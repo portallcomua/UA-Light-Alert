@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: UA Light Alert
- * Description: Відображення графіків відключень + CRM для рекламодавців
- * Version: 3.0
+ * Description: Відображення графіків відключень + CRM + Звукове оповіщення
+ * Version: 4.0
  * Author: You
  */
 
@@ -11,6 +11,7 @@ if (!defined('ABSPATH')) exit;
 class UA_Light_Alert {
 
     private $option_key = 'ua_light_ads';
+    private $settings_key = 'ua_light_settings';
 
     public function __construct() {
         add_shortcode('ua_light_schedule', [$this, 'render_frontend']);
@@ -29,7 +30,18 @@ class UA_Light_Alert {
     public function handle_admin_actions() {
         if (!current_user_can('manage_options')) return;
 
-        // Додавання / Редагування
+        // Збереження налаштувань (хвилини попередження)
+        if (isset($_POST['ua_save_settings']) && check_admin_referer('ua_settings_action')) {
+            $settings = [
+                'notice_minutes' => intval($_POST['notice_minutes']),
+                'sound_url' => esc_url_raw($_POST['sound_url'])
+            ];
+            update_option($this->settings_key, $settings);
+            wp_redirect(admin_url('admin.php?page=ua-light-alert&msg=settings_saved'));
+            exit;
+        }
+
+        // Додавання / Редагування рекламодавця
         if (isset($_POST['ua_save_ad']) && check_admin_referer('ua_save_ad_action')) {
             $ads = get_option($this->option_key, []);
             $ad_id = isset($_POST['ad_id']) ? intval($_POST['ad_id']) : -1;
@@ -48,12 +60,10 @@ class UA_Light_Alert {
             ];
 
             if ($ad_id >= 0 && isset($ads[$ad_id])) {
-                // Зберігаємо статистику при редагуванні
                 $ad_data['impressions'] = $ads[$ad_id]['impressions'] ?? 0;
                 $ad_data['clicks'] = $ads[$ad_id]['clicks'] ?? 0;
                 $ads[$ad_id] = $ad_data;
             } else {
-                // Новий
                 $ad_data['impressions'] = 0;
                 $ad_data['clicks'] = 0;
                 $ads[] = $ad_data;
@@ -80,8 +90,8 @@ class UA_Light_Alert {
 
     public function render_admin_page() {
         $ads = get_option($this->option_key, []);
+        $settings = get_option($this->settings_key, ['notice_minutes' => 30, 'sound_url' => '']);
         
-        // Перевіряємо, чи ми в режимі редагування
         $edit_id = isset($_GET['edit_ad']) ? intval($_GET['edit_ad']) : -1;
         $edit_ad = ($edit_id >= 0 && isset($ads[$edit_id])) ? $ads[$edit_id] : null;
 
@@ -90,10 +100,35 @@ class UA_Light_Alert {
         }
         ?>
         <div class="wrap">
-            <h1>UA Light Alert — Рекламодавці</h1>
+            <h1>UA Light Alert — Налаштування та Рекламодавці</h1>
+
+            <!-- Налаштування звуку -->
+            <div style="background: #fff; padding: 20px; border: 1px solid #ccd0d4; margin-bottom: 20px;">
+                <h2>🔔 Налаштування звукового оповіщення</h2>
+                <form method="post">
+                    <?php wp_nonce_field('ua_settings_action'); ?>
+                    <table class="form-table">
+                        <tr>
+                            <th>Попереджати за (хвилин)</th>
+                            <td>
+                                <input type="number" name="notice_minutes" value="<?php echo esc_attr($settings['notice_minutes']); ?>" min="1" max="120">
+                                <p class="description">Якщо до зміни статусу залишиться менше цього часу, з'явиться таймер.</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Посилання на MP3 файл</th>
+                            <td>
+                                <input type="url" name="sound_url" value="<?php echo esc_attr($settings['sound_url']); ?>" class="regular-text" placeholder="https://ваш-сайт.com/wp-content/uploads/alert.mp3">
+                                <p class="description">Завантажте mp3-файл через "Медіафайли" і скопіюйте його URL сюди.</p>
+                            </td>
+                        </tr>
+                    </table>
+                    <?php submit_button('Зберегти налаштування', 'primary', 'ua_save_settings'); ?>
+                </form>
+            </div>
 
             <div style="display:flex; gap:20px; align-items:flex-start;">
-                <!-- Форма -->
+                <!-- Форма рекламодавця -->
                 <div style="flex: 1; background: #fff; padding: 20px; border: 1px solid #ccd0d4;">
                     <h2><?php echo $edit_ad ? 'Редагувати клієнта' : 'Додати нового клієнта'; ?></h2>
                     <form method="post">
@@ -119,14 +154,12 @@ class UA_Light_Alert {
                                 <th>Регіон (regionId)</th>
                                 <td>
                                     <input type="text" name="ad_region" placeholder="напр. kyiv" class="regular-text" value="<?php echo esc_attr($edit_ad['region'] ?? ''); ?>">
-                                    <p class="description">Порожньо = для всіх регіонів.</p>
                                 </td>
                             </tr>
                             <tr>
                                 <th>Група</th>
                                 <td>
                                     <input type="text" name="ad_group" placeholder="напр. 3.1" class="regular-text" value="<?php echo esc_attr($edit_ad['group'] ?? ''); ?>">
-                                    <p class="description">Порожньо = для всіх груп.</p>
                                 </td>
                             </tr>
                             <tr>
@@ -135,7 +168,7 @@ class UA_Light_Alert {
                             </tr>
                             <tr>
                                 <th>Вартість</th>
-                                <td><input type="text" name="ad_cost" placeholder="напр. 1500 грн" class="regular-text" value="<?php echo esc_attr($edit_ad['cost'] ?? ''); ?>"></td>
+                                <td><input type="text" name="ad_cost" class="regular-text" value="<?php echo esc_attr($edit_ad['cost'] ?? ''); ?>"></td>
                             </tr>
                             <tr>
                                 <th>Період</th>
@@ -153,12 +186,12 @@ class UA_Light_Alert {
                         
                         <?php submit_button($edit_ad ? 'Зберегти зміни' : 'Додати клієнта', 'primary', 'ua_save_ad'); ?>
                         <?php if ($edit_ad): ?>
-                            <a href="<?php echo admin_url('admin.php?page=ua-light-alert'); ?>" class="button">Скасувати редагування</a>
+                            <a href="<?php echo admin_url('admin.php?page=ua-light-alert'); ?>" class="button">Скасувати</a>
                         <?php endif; ?>
                     </form>
                 </div>
 
-                <!-- Список -->
+                <!-- Список рекламодавців -->
                 <div style="flex: 2;">
                     <h2>База клієнтів та статистика</h2>
                     <?php if (empty($ads)): ?>
@@ -188,8 +221,7 @@ class UA_Light_Alert {
                                         <b>Регіон:</b> <?php echo esc_html($ad['region'] ?: 'Усі'); ?><br>
                                         <b>Група:</b> <?php echo esc_html($ad['group'] ?: 'Усі'); ?><br>
                                         <b>Вартість:</b> <?php echo esc_html($ad['cost']); ?><br>
-                                        <b>Період:</b> <?php echo esc_html($ad['period_start']); ?> - <?php echo esc_html($ad['period_end']); ?><br>
-                                        <b>Оплата:</b> <?php echo esc_html($ad['payment_info']); ?>
+                                        <b>Період:</b> <?php echo esc_html($ad['period_start']); ?> - <?php echo esc_html($ad['period_end']); ?>
                                     </td>
                                     <td style="font-size:12px;">
                                         👁 Показів: <b><?php echo intval($ad['impressions'] ?? 0); ?></b><br>
@@ -206,8 +238,6 @@ class UA_Light_Alert {
                     <?php endif; ?>
                 </div>
             </div>
-            <hr>
-            <p>Шорткод для сторінки: <code>[ua_light_schedule]</code></p>
         </div>
         <?php
     }
@@ -215,8 +245,17 @@ class UA_Light_Alert {
     /* ---------- Фронтенд ---------- */
 
     public function render_frontend() {
+        $settings = get_option($this->settings_key, ['notice_minutes' => 30, 'sound_url' => '']);
+        $notice_minutes = intval($settings['notice_minutes']);
+        $sound_url = $settings['sound_url'];
+
         ob_start();
         ?>
+        <!-- Аудіоелемент для звуку -->
+        <audio id="ua-alert-sound" preload="auto">
+            <source src="<?php echo esc_url($sound_url); ?>" type="audio/mpeg">
+        </audio>
+
         <div id="ua-light-widget" style="padding: 15px; border: 1px solid #eee; border-radius: 8px; font-family: sans-serif;">
             <div class="ua-controls">
                 <label style="display:block; margin-bottom:10px; font-weight:bold;">Регіон:
@@ -237,7 +276,13 @@ class UA_Light_Alert {
                     </select>
                 </label>
 
-                <button id="ua-show" style="padding: 10px 20px; background: #ff6b00; color: white; border: none; border-radius: 4px; font-weight: bold; width: 100%; cursor:pointer;">Показати графік</button>
+                <button id="ua-show" style="padding: 10px 20px; background: #ff6b00; color: white; border: none; border-radius: 4px; font-weight: bold; width: 100%; cursor:pointer;">Показати графік та увімкнути таймер</button>
+            </div>
+
+            <!-- Блок таймера -->
+            <div id="ua-timer-box" style="display:none; margin-top:15px; padding:15px; background:#fff3cd; border-left:4px solid #ffc107; border-radius:4px;">
+                <h3 style="margin:0 0 10px 0; color:#856404;">⏳ Наступна зміна статусу:</h3>
+                <p id="ua-timer-text" style="font-size:24px; font-weight:bold; margin:0; color:#856404; text-align:center;">--:--</p>
             </div>
 
             <div id="ua-result" style="margin-top:15px; font-size: 14px;"></div>
@@ -250,7 +295,13 @@ class UA_Light_Alert {
             var groupSelect = document.getElementById('ua-group');
             var resultDiv = document.getElementById('ua-result');
             var adSlot = document.getElementById('ua-ad-slot');
+            var timerBox = document.getElementById('ua-timer-box');
+            var timerText = document.getElementById('ua-timer-text');
+            var soundEl = document.getElementById('ua-alert-sound');
+            
             var currentData = null;
+            var timerInterval = null;
+            var noticeMinutes = <?php echo $notice_minutes; ?>;
 
             regionSelect.addEventListener('change', function() {
                 var region = this.value;
@@ -258,6 +309,8 @@ class UA_Light_Alert {
                 groupSelect.disabled = true;
                 resultDiv.innerHTML = '';
                 adSlot.innerHTML = '';
+                timerBox.style.display = 'none';
+                if(timerInterval) clearInterval(timerInterval);
 
                 if (!region) {
                     groupSelect.innerHTML = '<option value="">Спочатку оберіть регіон</option>';
@@ -297,7 +350,14 @@ class UA_Light_Alert {
                 if (!group) { alert('Оберіть групу'); return; }
                 if (!currentData) { alert('Дані ще не завантажені'); return; }
 
+                // Розблокування звуку (браузери вимагають кліку для відтворення)
+                if(soundEl) {
+                    soundEl.play().then(() => { soundEl.pause(); soundEl.currentTime = 0; }).catch(e => {});
+                }
+
                 resultDiv.innerHTML = '';
+                timerBox.style.display = 'none';
+                if(timerInterval) clearInterval(timerInterval);
                 
                 var timeKeys = Object.keys(currentData.fact.data);
                 if (timeKeys.length === 0) {
@@ -318,6 +378,7 @@ class UA_Light_Alert {
                 updP.innerHTML = '<strong>Оновлено:</strong> ' + new Date(upd).toLocaleString('uk-UA');
                 resultDiv.appendChild(updP);
 
+                // Малюємо таблицю
                 var table = document.createElement('table');
                 table.style.width = '100%';
                 table.style.borderCollapse = 'collapse';
@@ -367,8 +428,99 @@ class UA_Light_Alert {
                 table.appendChild(tbody);
                 resultDiv.appendChild(table);
 
+                // Логіка таймера
+                startTimer(groupData);
+
                 loadAds(region, group, adSlot);
             });
+
+            function startTimer(groupData) {
+                // Отримуємо поточний час за Києвом
+                var now = new Date();
+                // Якщо у вас інший часовий пояс, це можна змінити. Київ це UTC+2 або UTC+3.
+                // Для простоти беремо локальний час користувача.
+                
+                var currentHour = now.getHours(); 
+                var currentMinute = now.getMinutes();
+
+                // Шукаємо наступну зміну статусу
+                var nextChangeHour = -1;
+                var nextStatus = '';
+                var currentStatus = groupData[(currentHour + 1).toString()]; // поточна година (індекси 1-24)
+
+                // Проходимось по годинах, починаючи з наступної
+                for (var i = 1; i <= 25; i++) {
+                    var checkHour = (currentHour + i) % 24;
+                    if (checkHour === 0) checkHour = 24; // Кінець дня
+                    
+                    var status = groupData[checkHour.toString()];
+                    if (status && status !== currentStatus && status !== 'first' && status !== 'second') {
+                        nextChangeHour = checkHour;
+                        nextStatus = status;
+                        break;
+                    }
+                }
+
+                if (nextChangeHour === -1) {
+                    timerText.textContent = "Змін не знайдено";
+                    timerBox.style.display = 'block';
+                    return;
+                }
+
+                // Обчислюємо час до наступної зміни
+                var targetTime = new Date();
+                targetTime.setHours(nextChangeHour - 1, 0, 0, 0); // Початок години
+                
+                if (targetTime < now) {
+                    targetTime.setDate(targetTime.getDate() + 1);
+                }
+
+                var diffMs = targetTime - now;
+                var diffMins = Math.floor(diffMs / 60000);
+
+                // Показуємо таймер тільки якщо залишилось менше noticeMinutes
+                if (diffMins <= noticeMinutes && diffMins >= 0) {
+                    timerBox.style.display = 'block';
+                    var statusText = nextStatus === 'yes' ? 'Світло з\'явиться' : 'Світло зникне';
+                    
+                    timerInterval = setInterval(function() {
+                        var now2 = new Date();
+                        var diff2 = targetTime - now2;
+                        
+                        if (diff2 <= 0) {
+                            clearInterval(timerInterval);
+                            timerText.textContent = "Час настав!";
+                            
+                            // Відтворюємо звук
+                            if(soundEl && soundEl.src) {
+                                soundEl.play().catch(e => console.log('Помилка звуку:', e));
+                            }
+                            
+                            // Вібрація
+                            if(navigator.vibrate) {
+                                navigator.vibrate([500, 200, 500]);
+                            }
+
+                            // Попап
+                            alert('Увага! ' + statusText + '!');
+                            
+                            // Оновлюємо таймер
+                            setTimeout(() => {
+                                startTimer(groupData);
+                            }, 1000);
+                            
+                            return;
+                        }
+
+                        var mins = Math.floor(diff2 / 60000);
+                        var secs = Math.floor((diff2 % 60000) / 1000);
+                        timerText.innerHTML = statusText + ' через <br>' + mins + ' хв ' + (secs < 10 ? '0' : '') + secs + ' сек';
+                    }, 1000);
+                } else {
+                    timerBox.style.display = 'block';
+                    timerText.textContent = 'Наступна зміна о ' + (nextChangeHour < 10 ? '0' : '') + nextChangeHour + ':00. Таймер увімкнеться за ' + noticeMinutes + ' хв.';
+                }
+            }
 
             function loadAds(region, group, container) {
                 var xhr = new XMLHttpRequest();
@@ -377,7 +529,6 @@ class UA_Light_Alert {
                 xhr.onload = function() {
                     if (xhr.status === 200) {
                         container.innerHTML = xhr.responseText;
-                        // Відправляємо трекер показів (якщо реклама є)
                         if (xhr.responseText.indexOf('ua-ad-item') !== -1) {
                             var trackXhr = new XMLHttpRequest();
                             trackXhr.open('POST', '<?php echo admin_url('admin-ajax.php'); ?>');
@@ -419,7 +570,7 @@ class UA_Light_Alert {
 
 new UA_Light_Alert();
 
-/* AJAX для отримання реклами (з перевіркою дат та підключенням кліку) */
+/* AJAX для отримання реклами */
 add_action('wp_ajax_ua_get_ads', 'ua_light_get_ads');
 add_action('wp_ajax_nopriv_ua_get_ads', 'ua_light_get_ads');
 
@@ -431,15 +582,11 @@ function ua_light_get_ads() {
     $today  = date('Y-m-d');
 
     foreach ($ads as $ad) {
-        // 1. Перевірка регіону та групи
         if (!empty($ad['region']) && $ad['region'] !== $region) continue;
         if (!empty($ad['group']) && $ad['group'] !== $group) continue;
-
-        // 2. Перевірка періоду (якщо вказано)
         if (!empty($ad['period_start']) && $today < $ad['period_start']) continue;
         if (!empty($ad['period_end']) && $today > $ad['period_end']) continue;
 
-        // Виводимо рекламу (з обгорткою для відслідковування кліку)
         $output .= '<div class="ua-ad-item" style="border:1px solid #ddd;padding:10px;margin-bottom:10px;cursor:pointer;" 
                          onclick="trackClick(\'' . esc_js($region) . '\', \'' . esc_js($group) . '\')">'
                  . $ad['html']
@@ -447,7 +594,6 @@ function ua_light_get_ads() {
     }
 
     if ($output) {
-        // Додаємо JS для відстеження кліку
         $output .= '<script>
             function trackClick(region, group) {
                 var xhr = new XMLHttpRequest();

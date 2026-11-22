@@ -2,7 +2,7 @@
 /**
  * Plugin Name: UA Light Alert
  * Description: Графіки відключень, CRM рекламодавців та сповіщення про зміни електропостачання.
- * Version: 4.3.2
+ * Version: 4.3.3
  * Plugin URI: https://uaserver.pp.ua/svitlo/
  * Update URI: https://github.com/portallcomua/UA-Light-Alert
  * Author: UAServer
@@ -1355,6 +1355,8 @@ final class UA_Light_Alert_GitHub_Updater {
 
         // Compatibility path for older WordPress versions.
         add_filter('pre_set_site_transient_update_plugins', [$this, 'filter_update_transient']);
+        // Also inject when WordPress reads the cached update list (Plugins screen).
+        add_filter('site_transient_update_plugins', [$this, 'filter_site_update_transient']);
 
         add_filter('plugins_api', [$this, 'plugin_information'], 20, 3);
         add_filter('upgrader_source_selection', [$this, 'normalize_package_directory'], 10, 4);
@@ -1451,7 +1453,15 @@ final class UA_Light_Alert_GitHub_Updater {
     }
 
     public function filter_update_transient($transient) {
-        if (!is_object($transient) || empty($transient->checked) || !isset($transient->checked[$this->plugin_file])) {
+        return $this->inject_update_transient($transient);
+    }
+
+    public function filter_site_update_transient($transient) {
+        return $this->inject_update_transient($transient);
+    }
+
+    private function inject_update_transient($transient) {
+        if (!is_object($transient)) {
             return $transient;
         }
 
@@ -1464,6 +1474,11 @@ final class UA_Light_Alert_GitHub_Updater {
             $transient->response = [];
         }
         $transient->response[$this->plugin_file] = $candidate;
+
+        if (isset($transient->no_update) && is_array($transient->no_update)) {
+            unset($transient->no_update[$this->plugin_file]);
+        }
+
         return $transient;
     }
 

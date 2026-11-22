@@ -2,7 +2,7 @@
 /**
  * Plugin Name: UA Light Alert
  * Description: Графіки відключень, CRM рекламодавців та сповіщення про зміни електропостачання.
- * Version: 4.2.1
+ * Version: 4.2.2
  * Update URI: https://github.com/portallcomua/UA-Light-Alert
  * Author: UA Tools
  * Text Domain: ua-light-alert
@@ -1408,5 +1408,6 @@ final class UA_Light_Alert_GitHub_Updater {
     }
 }
 
+new UA_Light_Alert();
 new UA_Light_Alert_GitHub_Updater();
 

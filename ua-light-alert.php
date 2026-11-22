@@ -973,7 +973,7 @@ final class UA_Light_Alert {
 
                 timerBox.style.display = 'block';
 
-                if (minutesLeft <= noticeMinutes) {
+                if (diff > 0 && diff <= noticeMinutes * 60 * 1000) {
                     timerText.textContent = eventText + ' через ' +
                         minutesLeft + ' хв ' + String(seconds).padStart(2, '0') + ' сек';
 

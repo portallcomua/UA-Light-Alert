@@ -9,13 +9,26 @@ self.addEventListener('activate', function(event) {
     event.waitUntil(self.clients.claim());
 });
 
-// A fetch handler is required by older Chromium versions for PWA installability.
-// Keep requests network-first and preserve normal browser caching behavior.
+// A fetch handler is required by Chromium for PWA installability.
+// Keep same-origin page/asset requests network-first and avoid interfering with
+// third-party requests, wp-admin, login, or live previews.
 self.addEventListener('fetch', function(event) {
     if (event.request.method !== 'GET') return;
+    var url;
+    try {
+        url = new URL(event.request.url);
+    } catch (e) {
+        return;
+    }
+    if (url.origin !== self.location.origin) return;
+    if (url.pathname.indexOf('/wp-admin') === 0 || url.pathname.indexOf('/wp-login.php') === 0) return;
+    if (url.searchParams.has('preview') || url.searchParams.has('elementor-preview')) return;
+
     event.respondWith(
         fetch(event.request).catch(function() {
-            return caches.match(event.request);
+            return caches.match(event.request).then(function(cached) {
+                return cached || Response.error();
+            });
         })
     );
 });

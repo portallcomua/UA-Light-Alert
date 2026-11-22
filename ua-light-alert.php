@@ -2,7 +2,7 @@
 /**
  * Plugin Name: UA Light Alert
  * Description: Графіки відключень, CRM рекламодавців та сповіщення про зміни електропостачання.
- * Version: 4.6.1
+ * Version: 4.7.0
  * Plugin URI: https://uaserver.pp.ua/svitlo/
  * Update URI: https://github.com/portallcomua/UA-Light-Alert
  * Author: UAServer
@@ -15,6 +15,7 @@ if (!defined('ABSPATH')) {
 }
 
 require_once plugin_dir_path(__FILE__) . 'includes/class-ua-light-alert-push.php';
+require_once plugin_dir_path(__FILE__) . 'includes/class-ua-light-alert-mobile-api.php';
 
 final class UA_Light_Alert {
 
@@ -37,37 +38,75 @@ final class UA_Light_Alert {
 
         add_action('wp_ajax_ua_get_ads', 'ua_light_get_ads');
         add_action('wp_ajax_nopriv_ua_get_ads', 'ua_light_get_ads');
+
+        add_action('wp_ajax_ua_upload_voice_audio', [$this, 'ajax_upload_voice_audio']);
     }
 
 
     public function print_pwa_manifest() {
         // Keep one stable manifest URL across page loads.
         $manifest_url = add_query_arg(['ua_light_manifest' => '1'], home_url('/'));
+        $sw_url = add_query_arg(['ua_light_sw' => '1'], home_url('/'));
+        $sw_scope = home_url('/');
+        $apple_icon_url = plugin_dir_url(__FILE__) . 'assets/icons/ua-light-alert-icon-180.png';
+
         echo '<link rel="manifest" href="' . esc_url($manifest_url) . '">' . "\n";
+        echo '<link rel="apple-touch-icon" sizes="180x180" href="' . esc_url($apple_icon_url) . '">' . "\n";
         echo '<meta name="mobile-web-app-capable" content="yes">' . "\n";
         echo '<meta name="apple-mobile-web-app-capable" content="yes">' . "\n";
+        echo '<meta name="apple-mobile-web-app-title" content="Графік світла">' . "\n";
+        echo '<meta name="apple-mobile-web-app-status-bar-style" content="default">' . "\n";
+        echo '<meta name="application-name" content="Графік світла">' . "\n";
         echo '<meta name="theme-color" content="#ff6b00">' . "\n";
+        echo '<script>'
+            . '(function(){'
+            . 'var k="ua_light_pwa_installed_v1";'
+            . 'window.uaDeferredInstallPrompt=null;'
+            . 'window.addEventListener("beforeinstallprompt",function(e){'
+            . 'e.preventDefault();'
+            . 'window.uaDeferredInstallPrompt=e;'
+            . 'try{localStorage.removeItem(k);}catch(err){}'
+            . 'window.dispatchEvent(new Event("ua-install-ready"));'
+            . '});'
+            . 'window.addEventListener("appinstalled",function(){'
+            . 'window.uaDeferredInstallPrompt=null;'
+            . 'try{localStorage.setItem(k,"1");}catch(err){}'
+            . 'window.dispatchEvent(new Event("ua-app-installed"));'
+            . '});'
+            . 'if("serviceWorker" in navigator){'
+            . 'window.uaSwRegPromise=navigator.serviceWorker.register(' . wp_json_encode($sw_url) . ',{scope:' . wp_json_encode($sw_scope) . '}).catch(function(){return null;});'
+            . '}'
+            . '})();'
+            . '</script>' . "\n";
     }
 
     public function serve_pwa_resources() {
         if (isset($_GET['ua_light_manifest'])) {
             // Use one canonical launch URL and one stable app identity.
             $schedule_page = get_page_by_path('svitlo');
-            $start_url = $schedule_page ? get_permalink($schedule_page) : home_url('/');
+            if ($schedule_page) {
+                $start_url = get_permalink($schedule_page);
+            } else {
+                $saved_schedule_url = get_option('ua_light_schedule_page_url', '');
+                $start_url = $saved_schedule_url ? $saved_schedule_url : home_url('/');
+            }
             $app_id = home_url('/?ua-light-alert-app=1');
 
-            // Serve the icon as a real static plugin asset. Do not route icon
-            // requests through WordPress query parameters: page caches/security
-            // plugins may return HTML or block those requests, making Chrome reject
-            // the manifest. One square SVG scales cleanly for both required sizes.
+            // Serve static PNG icons directly from plugin assets so caches or
+            // security plugins never rewrite them to HTML.
             $icon_base_url = plugin_dir_url(__FILE__) . 'assets/icons/';
             $icons = [
                 ['src' => $icon_base_url . 'ua-light-alert-icon-192.png', 'sizes' => '192x192', 'type' => 'image/png', 'purpose' => 'any'],
                 ['src' => $icon_base_url . 'ua-light-alert-icon-512.png', 'sizes' => '512x512', 'type' => 'image/png', 'purpose' => 'any'],
+                ['src' => $icon_base_url . 'ua-light-alert-icon-maskable-512.png', 'sizes' => '512x512', 'type' => 'image/png', 'purpose' => 'maskable'],
             ];
+            $blog_name = trim((string) get_bloginfo('name'));
+            $app_name = $blog_name ? ('Графік відключень — ' . $blog_name) : 'Графік відключень';
             $manifest = [
-                'name' => get_bloginfo('name') . ' — UA Light Alert',
-                'short_name' => 'UA Light Alert',
+                'name' => $app_name,
+                'short_name' => 'Графік світла',
+                'lang' => 'uk',
+                'dir' => 'ltr',
                 'description' => 'Графіки та сповіщення про відключення електроенергії',
                 'start_url' => $start_url,
                 'scope' => home_url('/'),
@@ -96,9 +135,10 @@ final class UA_Light_Alert {
                 status_header(404);
                 exit;
             }
-            nocache_headers();
+            header('Cache-Control: no-cache, max-age=0');
             header('Content-Type: application/javascript; charset=utf-8');
-            header('Service-Worker-Allowed: ' . wp_parse_url(home_url('/'), PHP_URL_PATH));
+            $scope_path = wp_parse_url(home_url('/'), PHP_URL_PATH);
+            header('Service-Worker-Allowed: ' . ($scope_path ? $scope_path : '/'));
             readfile($file);
             exit;
         }
@@ -107,6 +147,7 @@ final class UA_Light_Alert {
     private function default_settings() {
         return [
             'notice_minutes' => 5,
+            'alert_mode'     => 'both',
             'sound_url'      => '',
             'sound_off_url'  => '',
             'sound_on_url'   => '',
@@ -114,6 +155,8 @@ final class UA_Light_Alert {
             'voice_gender'   => 'female',
             'voice_name'     => '',
             'voice_lang'     => '',
+            'voice_rate'     => 0.95,
+            'voice_pitch'    => 1.0,
             'voice_text_off' => 'Увага! За графіком очікується відключення електроенергії.',
             'voice_text_on'  => 'Увага! За графіком очікується відновлення електропостачання.',
             'voice_volume'   => 80,
@@ -125,8 +168,16 @@ final class UA_Light_Alert {
     }
 
     private function get_settings() {
-        $settings = get_option($this->settings_key, []);
-        $settings = wp_parse_args(is_array($settings) ? $settings : [], $this->default_settings());
+        $raw = get_option($this->settings_key, []);
+        $raw = is_array($raw) ? $raw : [];
+        $settings = wp_parse_args($raw, $this->default_settings());
+        // Backward compatibility: derive alert_mode from legacy voice_enabled if not saved yet.
+        if (empty($raw['alert_mode'])) {
+            $settings['alert_mode'] = !empty($settings['voice_enabled']) ? 'both' : 'audio';
+        }
+        if (!in_array($settings['alert_mode'], ['speech', 'audio', 'both'], true)) {
+            $settings['alert_mode'] = 'both';
+        }
         // Backward compatibility: the old single sound is used for both event types.
         if (empty($settings['sound_off_url']) && !empty($settings['sound_url'])) {
             $settings['sound_off_url'] = $settings['sound_url'];
@@ -134,7 +185,300 @@ final class UA_Light_Alert {
         if (empty($settings['sound_on_url']) && !empty($settings['sound_url'])) {
             $settings['sound_on_url'] = $settings['sound_url'];
         }
+        $settings['voice_rate'] = max(0.7, min(1.3, (float) $settings['voice_rate']));
+        $settings['voice_pitch'] = max(0.8, min(1.2, (float) $settings['voice_pitch']));
         return $settings;
+    }
+
+    public function ajax_upload_voice_audio() {
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(['message' => 'Недостатньо прав.'], 403);
+        }
+        check_ajax_referer('ua_upload_voice_audio', 'nonce');
+
+        if (empty($_FILES['audio']) || !is_array($_FILES['audio'])) {
+            wp_send_json_error(['message' => 'Аудіофайл не передано.'], 400);
+        }
+        $file = $_FILES['audio'];
+        if (!empty($file['error'])) {
+            wp_send_json_error(['message' => 'Помилка завантаження файлу.'], 400);
+        }
+        if (isset($file['size']) && (int) $file['size'] > 5 * 1024 * 1024) {
+            wp_send_json_error(['message' => 'Файл завеликий (максимум 5 МБ).'], 400);
+        }
+
+        if (!function_exists('wp_handle_upload')) {
+            require_once ABSPATH . 'wp-admin/includes/file.php';
+        }
+        if (!function_exists('wp_generate_attachment_metadata')) {
+            require_once ABSPATH . 'wp-admin/includes/image.php';
+            require_once ABSPATH . 'wp-admin/includes/media.php';
+        }
+
+        $allowed_mimes = [
+            'wav' => 'audio/wav',
+            'mp3' => 'audio/mpeg',
+            'm4a' => 'audio/mp4',
+            'ogg' => 'audio/ogg',
+        ];
+        $upload = wp_handle_upload($file, [
+            'test_form' => false,
+            'mimes'     => $allowed_mimes,
+        ]);
+
+        if (!is_array($upload) || !empty($upload['error']) || empty($upload['url']) || empty($upload['file'])) {
+            $msg = is_array($upload) && !empty($upload['error']) ? $upload['error'] : 'Не вдалося зберегти аудіо.';
+            wp_send_json_error(['message' => $msg], 400);
+        }
+
+        $kind = sanitize_key(wp_unslash($_POST['kind'] ?? 'alert'));
+        $title = $kind === 'on'
+            ? 'UA Light Alert — голос перед увімкненням'
+            : ($kind === 'off' ? 'UA Light Alert — голос перед вимкненням' : 'UA Light Alert — запис голосу');
+
+        $attachment_id = wp_insert_attachment([
+            'post_mime_type' => $upload['type'],
+            'post_title'     => $title,
+            'post_content'   => '',
+            'post_status'    => 'inherit',
+        ], $upload['file']);
+
+        if (!is_wp_error($attachment_id) && $attachment_id) {
+            $metadata = wp_generate_attachment_metadata($attachment_id, $upload['file']);
+            if (is_array($metadata)) {
+                wp_update_attachment_metadata($attachment_id, $metadata);
+            }
+        }
+
+        wp_send_json_success([
+            'url' => esc_url_raw($upload['url']),
+            'id'  => is_wp_error($attachment_id) ? 0 : (int) $attachment_id,
+        ]);
+    }
+
+    private function get_speech_helper_js() {
+        return <<<'JS'
+function isUkrainianVoice(voice) {
+    if (!voice) return false;
+    var lang = String(voice.lang || '');
+    var name = String(voice.name || '');
+    return /^uk([-_]|$)/i.test(lang) || /ukrain|україн/i.test(name);
+}
+
+function scoreUkrainianVoice(voice, preferredName, preferredLang, preferredGender) {
+    if (!isUkrainianVoice(voice)) return -1;
+    var name = String(voice.name || '');
+    var lang = String(voice.lang || '');
+    var score = 10;
+    if (preferredName && name === preferredName) {
+        score += 200;
+        if (preferredLang && lang === preferredLang) score += 20;
+    }
+    if (/natural|neural|online|enhanced|premium|wavenet|studio/i.test(name)) score += 120;
+    if (/google/i.test(name)) score += 90;
+    if (voice.localService === false) score += 40;
+    if (/^uk[-_]UA$/i.test(lang)) score += 20;
+    if (/espeak|festival|pico|flite|mbrola/i.test(name)) score -= 80;
+    if (!preferredName) {
+        if (preferredGender === 'female' && /polina|lesya|olena|iryna|natal|female|жіноч/i.test(name)) score += 15;
+        if (preferredGender === 'male' && /ostap|dmytro|taras|male|чоловіч/i.test(name)) score += 15;
+    }
+    return score;
+}
+
+function selectBestUkrainianVoice(preferredName, preferredLang, preferredGender) {
+    if (!('speechSynthesis' in window) || !window.speechSynthesis.getVoices) return null;
+    var voices = window.speechSynthesis.getVoices() || [];
+    if (preferredName) {
+        var exact = voices.find(function(v) {
+            return v.name === preferredName && (!preferredLang || v.lang === preferredLang);
+        }) || voices.find(function(v) {
+            return v.name === preferredName;
+        });
+        if (exact) return exact;
+    }
+    var best = null;
+    var bestScore = -1;
+    voices.forEach(function(v) {
+        var sc = scoreUkrainianVoice(v, '', '', preferredGender);
+        if (sc > bestScore) {
+            bestScore = sc;
+            best = v;
+        }
+    });
+    return best;
+}
+
+function uaPluralWord(n, one, few, many) {
+    var mod100 = n % 100;
+    var mod10 = n % 10;
+    if (mod100 >= 11 && mod100 <= 14) return many;
+    if (mod10 === 1) return one;
+    if (mod10 >= 2 && mod10 <= 4) return few;
+    return many;
+}
+
+function formatUkrainianMinutes(mm) {
+    if (mm <= 0) return '';
+    var onesFem = ['', 'одна', 'дві', 'три', 'чотири', 'п’ять', 'шість', 'сім', 'вісім', 'дев’ять'];
+    var teens = ['десять', 'одинадцять', 'дванадцять', 'тринадцять', 'чотирнадцять', 'п’ятнадцять', 'шістнадцять', 'сімнадцять', 'вісімнадцять', 'дев’ятнадцять'];
+    var tens = ['', '', 'двадцять', 'тридцять', 'сорок', 'п’ятдесят'];
+    var words = '';
+    if (mm < 10) {
+        words = onesFem[mm];
+    } else if (mm < 20) {
+        words = teens[mm - 10];
+    } else {
+        var t = Math.floor(mm / 10);
+        var u = mm % 10;
+        words = tens[t] + (u ? ' ' + onesFem[u] : '');
+    }
+    return words + ' ' + uaPluralWord(mm, 'хвилина', 'хвилини', 'хвилин');
+}
+
+function formatUkrainianTime(hh, mm, withPreposition) {
+    var locativeHours = [
+        'нульовій', 'першій', 'другій', 'третій', 'четвертій', 'п’ятій',
+        'шостій', 'сьомій', 'восьмій', 'дев’ятій', 'десятій', 'одинадцятій',
+        'дванадцятій', 'тринадцятій', 'чотирнадцятій', 'п’ятнадцятій', 'шістнадцятій',
+        'сімнадцятій', 'вісімнадцятій', 'дев’ятнадцятій', 'двадцятій',
+        'двадцять першій', 'двадцять другій', 'двадцять третій'
+    ];
+    var nominativeHours = [
+        'нульова', 'перша', 'друга', 'третя', 'четверта', 'п’ята',
+        'шоста', 'сьома', 'восьма', 'дев’ята', 'десята', 'одинадцята',
+        'дванадцята', 'тринадцята', 'чотирнадцята', 'п’ятнадцята', 'шістнадцята',
+        'сімнадцята', 'вісімнадцята', 'дев’ятнадцята', 'двадцята',
+        'двадцять перша', 'двадцять друга', 'двадцять третя'
+    ];
+    if (withPreposition) {
+        if (hh === 0 && mm === 0) return 'опівночі';
+        var prep = hh === 11 ? 'об' : 'о';
+        var hLoc = locativeHours[hh] || String(hh);
+        var minPart = mm > 0 ? (' ' + formatUkrainianMinutes(mm)) : '';
+        return prep + ' ' + hLoc + ' годині' + minPart;
+    }
+    if (hh === 0 && mm === 0) return 'опівночі';
+    var hNom = nominativeHours[hh] || String(hh);
+    var minPartNom = mm > 0 ? (' ' + formatUkrainianMinutes(mm)) : '';
+    return hNom + ' година' + minPartNom;
+}
+
+function normalizeUkrainianSpeechText(rawText, eventTime, groupLabel) {
+    var text = String(rawText || '').trim();
+    var cleanGroup = String(groupLabel || '').replace(/^GPV/i, '').trim();
+    var hadTimeRef = /\{time\}/i.test(text) || /\b(?:[01]?\d|2[0-3]):[0-5]\d\b/.test(text);
+
+    if (eventTime) {
+        text = text.replace(/\{time\}/gi, eventTime);
+    }
+    if (cleanGroup) {
+        text = text.replace(/\{group\}/gi, cleanGroup);
+    } else {
+        text = text.replace(/\{group\}/gi, '');
+    }
+
+    if (eventTime && !hadTimeRef) {
+        var parts = eventTime.split(':');
+        var eh = parseInt(parts[0], 10);
+        var em = parseInt(parts[1], 10);
+        if (!isNaN(eh) && !isNaN(em)) {
+            text = text.replace(/[.\s]+$/, '') + ', орієнтовно ' + formatUkrainianTime(eh, em, true) + '.';
+        }
+    }
+
+    text = text.replace(/(^|[\s,(])(о|об)\s+([01]?\d|2[0-3]):([0-5]\d)\b/gi, function(_, prefix, prepWord, hStr, mStr) {
+        var formatted = formatUkrainianTime(parseInt(hStr, 10), parseInt(mStr, 10), true);
+        if (prepWord && prepWord.charAt(0) === prepWord.charAt(0).toUpperCase()) {
+            formatted = formatted.charAt(0).toUpperCase() + formatted.slice(1);
+        }
+        return prefix + formatted;
+    });
+    text = text.replace(/\b([01]?\d|2[0-3]):([0-5]\d)\b/g, function(_, hStr, mStr) {
+        return formatUkrainianTime(parseInt(hStr, 10), parseInt(mStr, 10), false);
+    });
+
+    text = text.replace(/(\d+)\s*хв\.?(?=\s|$|[.,!?;:])/gi, function(_, num) {
+        var n = parseInt(num, 10);
+        return num + ' ' + uaPluralWord(n, 'хвилина', 'хвилини', 'хвилин');
+    });
+    text = text.replace(/(\d+)\s*год\.?(?=\s|$|[.,!?;:])/gi, function(_, num) {
+        var n = parseInt(num, 10);
+        return num + ' ' + uaPluralWord(n, 'година', 'години', 'годин');
+    });
+    text = text.replace(/(\d+)\s*сек\.?(?=\s|$|[.,!?;:])/gi, function(_, num) {
+        var n = parseInt(num, 10);
+        return num + ' ' + uaPluralWord(n, 'секунда', 'секунди', 'секунд');
+    });
+    text = text.replace(/(^|\s)е\/е(?=\s|$|[.,!?;:])/gi, '$1електроенергії');
+    text = text.replace(/(^|\s)е\.е\.(?=\s|$|[.,!?;:])/gi, '$1електроенергії');
+    text = text.replace(/(\d+)\s*кВт/gi, '$1 кіловат');
+    text = text.replace(/(\d+)\s*%/g, '$1 відсотків');
+    text = text.replace(/\s*[—–]\s+/g, ', ');
+    text = text.replace(/\s{2,}/g, ' ').trim();
+    return text;
+}
+
+function splitSpeechSentences(text) {
+    var normalized = String(text || '').trim();
+    if (!normalized) return [];
+    var parts = normalized.replace(/([.!?…]+)\s+/g, '$1\n').split('\n');
+    return parts.map(function(s) { return s.trim(); }).filter(Boolean);
+}
+
+function speakUkrainianText(text, options) {
+    options = options || {};
+    if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) {
+        if (options.onUnavailable) options.onUnavailable();
+        return;
+    }
+    var voices = window.speechSynthesis.getVoices() || [];
+    var selectedVoice = selectBestUkrainianVoice(options.voiceName || '', options.voiceLang || '', options.voiceGender || 'female');
+    if (voices.length > 0 && !selectedVoice && !options.voiceName) {
+        if (options.onUnavailable) options.onUnavailable();
+        return;
+    }
+
+    var sentences = splitSpeechSentences(text);
+    if (!sentences.length) return;
+
+    var rate = typeof options.rate === 'number' && !isNaN(options.rate) ? Math.max(0.7, Math.min(1.3, options.rate)) : 0.95;
+    var pitch = typeof options.pitch === 'number' && !isNaN(options.pitch) ? Math.max(0.8, Math.min(1.2, options.pitch)) : 1.0;
+    var volume = typeof options.volume === 'number' && !isNaN(options.volume) ? Math.max(0, Math.min(1, options.volume)) : 0.8;
+
+    window.speechSynthesis.cancel();
+    var index = 0;
+
+    function speakNextSentence() {
+        if (index >= sentences.length) {
+            if (options.onEnd) options.onEnd();
+            return;
+        }
+        var utterance = new SpeechSynthesisUtterance(sentences[index]);
+        utterance.lang = selectedVoice ? selectedVoice.lang : 'uk-UA';
+        utterance.volume = volume;
+        utterance.rate = rate;
+        utterance.pitch = pitch;
+        if (selectedVoice) utterance.voice = selectedVoice;
+
+        utterance.onend = function() {
+            index++;
+            if (index < sentences.length) {
+                setTimeout(speakNextSentence, 120);
+            } else if (options.onEnd) {
+                options.onEnd();
+            }
+        };
+        utterance.onerror = function() {
+            if (options.onError) options.onError();
+        };
+        window.speechSynthesis.speak(utterance);
+    }
+
+    // Short delay after cancel() avoids Chrome clipping the first syllable.
+    setTimeout(speakNextSentence, 150);
+}
+JS;
     }
 
     /* ---------------------------------------------------------
@@ -182,12 +526,20 @@ final class UA_Light_Alert {
             if (!in_array($notice_minutes, [1, 5, 10], true)) {
                 $notice_minutes = 5;
             }
+            $alert_mode = sanitize_key(wp_unslash($_POST['alert_mode'] ?? 'both'));
+            if (!in_array($alert_mode, ['speech', 'audio', 'both'], true)) {
+                $alert_mode = 'both';
+            }
             $voice_volume = isset($_POST['voice_volume']) ? absint($_POST['voice_volume']) : 80;
             $voice_volume = min(100, $voice_volume);
             $voice_gender = sanitize_key(wp_unslash($_POST['voice_gender'] ?? 'female'));
             if (!in_array($voice_gender, ['female', 'male'], true)) $voice_gender = 'female';
             $voice_name = sanitize_text_field(wp_unslash($_POST['voice_name'] ?? ''));
             $voice_lang = sanitize_text_field(wp_unslash($_POST['voice_lang'] ?? ''));
+            $voice_rate = isset($_POST['voice_rate']) ? (float) str_replace(',', '.', wp_unslash($_POST['voice_rate'])) : 0.95;
+            $voice_rate = round(max(0.7, min(1.3, $voice_rate)), 2);
+            $voice_pitch = isset($_POST['voice_pitch']) ? (float) str_replace(',', '.', wp_unslash($_POST['voice_pitch'])) : 1.0;
+            $voice_pitch = round(max(0.8, min(1.2, $voice_pitch)), 2);
             $voice_text_off = sanitize_textarea_field(wp_unslash($_POST['voice_text_off'] ?? ''));
             $voice_text_on = sanitize_textarea_field(wp_unslash($_POST['voice_text_on'] ?? ''));
             if ($voice_text_off === '') $voice_text_off = $this->default_settings()['voice_text_off'];
@@ -201,12 +553,15 @@ final class UA_Light_Alert {
             if (!preg_match('/^(?:[01]\d|2[0-3]):[0-5]\d$/', $quiet_end)) $quiet_end = '';
             $settings = [
                 'notice_minutes' => $notice_minutes,
+                'alert_mode'     => $alert_mode,
                 'sound_off_url'  => esc_url_raw(wp_unslash($_POST['sound_off_url'] ?? '')),
                 'sound_on_url'   => esc_url_raw(wp_unslash($_POST['sound_on_url'] ?? '')),
-                'voice_enabled'  => isset($_POST['voice_enabled']) ? 1 : 0,
+                'voice_enabled'  => ($alert_mode !== 'audio') ? 1 : 0,
                 'voice_gender'   => $voice_gender,
                 'voice_name'     => $voice_name,
                 'voice_lang'     => $voice_lang,
+                'voice_rate'     => $voice_rate,
+                'voice_pitch'    => $voice_pitch,
                 'voice_text_off' => $voice_text_off,
                 'voice_text_on'  => $voice_text_on,
                 'voice_volume'   => $voice_volume,
@@ -344,71 +699,107 @@ final class UA_Light_Alert {
                             </td>
                         </tr>
                         <tr>
-                            <th scope="row">Звук перед вимкненням</th>
+                            <th scope="row">Режим сповіщення</th>
+                            <td>
+                                <fieldset id="ua-light-alert-mode">
+                                    <label style="display:block;margin-bottom:6px;">
+                                        <input type="radio" name="alert_mode" value="both" <?php checked($settings['alert_mode'], 'both'); ?>>
+                                        <strong>Сигнал / MP3 + озвучення тексту</strong> — спочатку звуковий файл (або короткий сигнал), потім голосове повідомлення.
+                                    </label>
+                                    <label style="display:block;margin-bottom:6px;">
+                                        <input type="radio" name="alert_mode" value="speech" <?php checked($settings['alert_mode'], 'speech'); ?>>
+                                        <strong>Тільки озвучення набраного тексту</strong> — без попереднього MP3 (якщо пристрій без українського голосу, відтвориться запасний сигнал).
+                                    </label>
+                                    <label style="display:block;">
+                                        <input type="radio" name="alert_mode" value="audio" <?php checked($settings['alert_mode'], 'audio'); ?>>
+                                        <strong>Тільки власний MP3 або запис з мікрофона</strong> — найкраща якість «живого» голосу на всіх пристроях (без синтезатора браузера).
+                                    </label>
+                                </fieldset>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row">Аудіо перед вимкненням</th>
                             <td>
                                 <input type="url" id="ua-light-sound-off" name="sound_off_url"
                                     value="<?php echo esc_attr($settings['sound_off_url']); ?>" class="regular-text"
                                     placeholder="https://example.com/off.mp3">
-                                <button type="button" class="button ua-light-select-audio" data-target="ua-light-sound-off">Обрати MP3 з пристрою</button>
+                                <button type="button" class="button ua-light-select-audio" data-target="ua-light-sound-off">Обрати / завантажити MP3</button>
+                                <button type="button" class="button ua-light-record-audio" data-target="ua-light-sound-off" data-kind="off">🎙 Записати голос</button>
                                 <button type="button" class="button ua-light-preview-audio" data-target="ua-light-sound-off">Прослухати</button>
-                                <p class="description">Можна вибрати MP3. Якщо файл не задано, плагін відтворить вбудований короткий сигнал.</p>
+                                <span class="ua-light-record-status" id="ua-light-record-status-off" style="margin-left:8px;font-weight:600;"></span>
+                                <p class="description">Можна вибрати готовий MP3/WAV/M4A з пристрою або одразу записати власний голос з мікрофона (збережеться у Медіабібліотеці WordPress). Якщо поле порожнє — відтвориться вбудований короткий сигнал.</p>
                             </td>
                         </tr>
                         <tr>
-                            <th scope="row">Звук перед увімкненням</th>
+                            <th scope="row">Аудіо перед увімкненням</th>
                             <td>
                                 <input type="url" id="ua-light-sound-on" name="sound_on_url"
                                     value="<?php echo esc_attr($settings['sound_on_url']); ?>" class="regular-text"
                                     placeholder="https://example.com/on.mp3">
-                                <button type="button" class="button ua-light-select-audio" data-target="ua-light-sound-on">Обрати MP3 з пристрою</button>
+                                <button type="button" class="button ua-light-select-audio" data-target="ua-light-sound-on">Обрати / завантажити MP3</button>
+                                <button type="button" class="button ua-light-record-audio" data-target="ua-light-sound-on" data-kind="on">🎙 Записати голос</button>
                                 <button type="button" class="button ua-light-preview-audio" data-target="ua-light-sound-on">Прослухати</button>
-                                <p class="description">Окремий MP3 перед запланованим відновленням. Якщо файл не задано — вбудований висхідний сигнал.</p>
+                                <span class="ua-light-record-status" id="ua-light-record-status-on" style="margin-left:8px;font-weight:600;"></span>
+                                <p class="description">Окремий MP3 або голосовий запис перед відновленням світла. Якщо порожньо — вбудований висхідний сигнал.</p>
                             </td>
                         </tr>
-                    
-                    <tr>
-                        <th scope="row">Голосові повідомлення</th>
-                        <td>
-                            <label><input type="checkbox" name="voice_enabled" value="1" <?php checked(!empty($settings['voice_enabled'])); ?>> Озвучувати попередження українською мовою, коли сторінка відкрита</label>
-                            <p class="description">Використовує синтез мовлення браузера. Наявність українського голосу залежить від пристрою та браузера.</p>
-                        </td>
-                    </tr>
-                    <tr>
-                        <th scope="row">Голос</th>
+
+                    <tr class="ua-light-speech-row">
+                        <th scope="row">Голос (синтез мовлення)</th>
                         <td>
                             <select name="voice_name" id="ua-light-voice-name" class="regular-text">
-                                <option value="">Автоматично — перший доступний український голос</option>
+                                <option value="">Автоматично — найкращий доступний український голос (Natural / Google)</option>
                             </select>
                             <input type="hidden" name="voice_lang" id="ua-light-voice-lang" value="<?php echo esc_attr($settings['voice_lang']); ?>">
-                            <input type="hidden" name="voice_gender" value="<?php echo esc_attr($settings['voice_gender']); ?>">
-                            <p class="description" id="ua-light-voice-status">Список формується з голосів, які реально доступні у цьому браузері. Якщо українського голосу немає, браузер може використати голос за замовчуванням іншою мовою.</p>
+                            <select name="voice_gender" id="ua-light-voice-gender" style="margin-left:6px;">
+                                <option value="female" <?php selected($settings['voice_gender'], 'female'); ?>>Бажано жіночий</option>
+                                <option value="male" <?php selected($settings['voice_gender'], 'male'); ?>>Бажано чоловічий</option>
+                            </select>
+                            <p class="description" id="ua-light-voice-status">У режимі «Автоматично» плагін сам шукає найприродніший український голос (Google / Microsoft Natural / Lesya) на пристрої кожного відвідувача і ніколи не озвучує текст чужою мовою.</p>
                         </td>
                     </tr>
-                    <tr>
+                    <tr class="ua-light-speech-row">
+                        <th scope="row">Швидкість і тон голосу</th>
+                        <td>
+                            <label style="margin-right:18px;">
+                                Швидкість:
+                                <input type="range" id="ua-light-voice-rate" name="voice_rate" min="0.7" max="1.3" step="0.05" value="<?php echo esc_attr(number_format((float) $settings['voice_rate'], 2, '.', '')); ?>" oninput="this.nextElementSibling.value=Number(this.value).toFixed(2)+'x'">
+                                <output><?php echo esc_html(number_format((float) $settings['voice_rate'], 2, '.', '')); ?>x</output>
+                            </label>
+                            <label>
+                                Тон:
+                                <input type="range" id="ua-light-voice-pitch" name="voice_pitch" min="0.8" max="1.2" step="0.05" value="<?php echo esc_attr(number_format((float) $settings['voice_pitch'], 2, '.', '')); ?>" oninput="this.nextElementSibling.value=Number(this.value).toFixed(2)">
+                                <output><?php echo esc_html(number_format((float) $settings['voice_pitch'], 2, '.', '')); ?></output>
+                            </label>
+                            <p class="description">Трохи сповільнена швидкість (0.90x–0.95x) робить синтезований голос чіткішим і менш механічним.</p>
+                        </td>
+                    </tr>
+                    <tr class="ua-light-speech-row">
                         <th scope="row">Текст перед вимкненням</th>
                         <td>
                             <textarea name="voice_text_off" id="ua-light-voice-text-off" rows="3" class="large-text"><?php echo esc_textarea($settings['voice_text_off']); ?></textarea>
                             <button type="button" class="button ua-light-preview-voice" data-target="ua-light-voice-text-off">Прослухати</button>
+                            <p class="description">Підтримуються вставки <code>{time}</code> (час зміни, автоматично перетворюється у правильні українські слова на кшталт «о двадцятій годині») та <code>{group}</code> (група).</p>
                         </td>
                     </tr>
-                    <tr>
+                    <tr class="ua-light-speech-row">
                         <th scope="row">Текст перед увімкненням</th>
                         <td>
                             <textarea name="voice_text_on" id="ua-light-voice-text-on" rows="3" class="large-text"><?php echo esc_textarea($settings['voice_text_on']); ?></textarea>
                             <button type="button" class="button ua-light-preview-voice" data-target="ua-light-voice-text-on">Прослухати</button>
-                            <p class="description">Тестове прослуховування використовує голоси, доступні у вашому браузері. Зміни тексту та голосу збережіть перед використанням на сайті.</p>
+                            <p class="description" id="ua-light-voice-preview-note">Натисніть «Прослухати», щоб перевірити реальну вимову з нормалізованим часом і паузами. Зміни збережіть кнопкою нижче.</p>
                         </td>
                     </tr>
-                    <tr>
+                    <tr class="ua-light-speech-row">
                         <th scope="row">Гучність голосу</th>
                         <td>
-                            <input type="range" name="voice_volume" min="0" max="100" step="5" value="<?php echo esc_attr((int) $settings['voice_volume']); ?>" oninput="this.nextElementSibling.value=this.value+'%'">
+                            <input type="range" id="ua-light-voice-volume" name="voice_volume" min="0" max="100" step="5" value="<?php echo esc_attr((int) $settings['voice_volume']); ?>" oninput="this.nextElementSibling.value=this.value+'%'">
                             <output><?php echo esc_html((int) $settings['voice_volume']); ?>%</output>
                         </td>
                     </tr>
                     <tr>
-                        <th scope="row">Гучність звукового сигналу</th>
-                        <td><input type="range" name="sound_volume" min="0" max="100" step="5" value="<?php echo esc_attr((int) $settings['sound_volume']); ?>" oninput="this.nextElementSibling.value=this.value+'%'"> <output><?php echo esc_html((int) $settings['sound_volume']); ?>%</output></td>
+                        <th scope="row">Гучність аудіо / сигналу</th>
+                        <td><input type="range" id="ua-light-sound-volume" name="sound_volume" min="0" max="100" step="5" value="<?php echo esc_attr((int) $settings['sound_volume']); ?>" oninput="this.nextElementSibling.value=this.value+'%'"> <output><?php echo esc_html((int) $settings['sound_volume']); ?>%</output></td>
                     </tr>
                     <tr>
                         <th scope="row">Повтор попередження</th>
@@ -421,12 +812,25 @@ final class UA_Light_Alert {
                     </table>
                     <script>
                     jQuery(function($) {
+                        <?php echo $this->get_speech_helper_js(); ?>
+
+                        var uploadAudioUrl = <?php echo wp_json_encode(admin_url('admin-ajax.php')); ?>;
+                        var uploadAudioNonce = <?php echo wp_json_encode(wp_create_nonce('ua_upload_voice_audio')); ?>;
+                        var activePreviewAudio = null;
+
+                        function syncModeRows() {
+                            var mode = $('input[name="alert_mode"]:checked').val() || 'both';
+                            $('.ua-light-speech-row').toggle(mode !== 'audio');
+                        }
+                        $('input[name="alert_mode"]').on('change', syncModeRows);
+                        syncModeRows();
+
                         $('.ua-light-select-audio').on('click', function(e) {
                             e.preventDefault();
                             var target = $('#' + $(this).data('target'));
                             var frame = wp.media({
-                                title: 'Оберіть MP3-файл',
-                                button: { text: 'Використати цей MP3' },
+                                title: 'Оберіть або завантажте аудіофайл (MP3 / WAV / M4A)',
+                                button: { text: 'Використати цей файл' },
                                 library: { type: 'audio' },
                                 multiple: false
                             });
@@ -436,76 +840,268 @@ final class UA_Light_Alert {
                             });
                             frame.open();
                         });
+
+                        function encodeWavFromFloat32(samples, sampleRate) {
+                            var buffer = new ArrayBuffer(44 + samples.length * 2);
+                            var view = new DataView(buffer);
+                            function writeStr(offset, str) {
+                                for (var i = 0; i < str.length; i++) {
+                                    view.setUint8(offset + i, str.charCodeAt(i));
+                                }
+                            }
+                            writeStr(0, 'RIFF');
+                            view.setUint32(4, 36 + samples.length * 2, true);
+                            writeStr(8, 'WAVE');
+                            writeStr(12, 'fmt ');
+                            view.setUint32(16, 16, true);
+                            view.setUint16(20, 1, true);
+                            view.setUint16(22, 1, true);
+                            view.setUint32(24, sampleRate, true);
+                            view.setUint32(28, sampleRate * 2, true);
+                            view.setUint16(32, 2, true);
+                            view.setUint16(34, 16, true);
+                            writeStr(36, 'data');
+                            view.setUint32(40, samples.length * 2, true);
+                            var offset = 44;
+                            for (var i = 0; i < samples.length; i++, offset += 2) {
+                                var s = Math.max(-1, Math.min(1, samples[i]));
+                                view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+                            }
+                            return new Blob([view], { type: 'audio/wav' });
+                        }
+
+                        function convertBlobToWav(blob) {
+                            var AudioCtx = window.AudioContext || window.webkitAudioContext;
+                            if (!AudioCtx) return Promise.reject(new Error('AudioContext unsupported'));
+                            var ctx = new AudioCtx();
+                            return blob.arrayBuffer().then(function(arr) {
+                                return ctx.decodeAudioData(arr);
+                            }).then(function(decoded) {
+                                var targetRate = 22050;
+                                var length = Math.max(1, Math.ceil(decoded.duration * targetRate));
+                                var OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+                                if (!OfflineCtx) {
+                                    var ch = decoded.getChannelData(0);
+                                    try { ctx.close(); } catch (e) {}
+                                    return encodeWavFromFloat32(ch, decoded.sampleRate);
+                                }
+                                var offline = new OfflineCtx(1, length, targetRate);
+                                var src = offline.createBufferSource();
+                                src.buffer = decoded;
+                                src.connect(offline.destination);
+                                src.start(0);
+                                return offline.startRendering().then(function(rendered) {
+                                    try { ctx.close(); } catch (e) {}
+                                    return encodeWavFromFloat32(rendered.getChannelData(0), targetRate);
+                                });
+                            });
+                        }
+
+                        var currentRecorder = null;
+                        $('.ua-light-record-audio').on('click', function(e) {
+                            e.preventDefault();
+                            var btn = $(this);
+                            var targetInput = $('#' + btn.data('target'));
+                            var kind = btn.data('kind') || 'off';
+                            var statusEl = $('#ua-light-record-status-' + kind);
+
+                            if (currentRecorder && currentRecorder.button && currentRecorder.button[0] === btn[0]) {
+                                currentRecorder.stop();
+                                return;
+                            }
+                            if (currentRecorder) {
+                                currentRecorder.stop();
+                            }
+
+                            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) {
+                                statusEl.css('color', '#b32d2e').text('Запис з мікрофона недоступний у цьому браузері (потрібен HTTPS).');
+                                return;
+                            }
+
+                            statusEl.css('color', '#555').text('Запит доступу до мікрофона…');
+                            navigator.mediaDevices.getUserMedia({ audio: true }).then(function(stream) {
+                                var chunks = [];
+                                var recorder = new MediaRecorder(stream);
+                                var autoStopTimer = null;
+
+                                btn.text('⏹ Зупинити запис');
+                                statusEl.css('color', '#b32d2e').text('● Іде запис (до 30 сек)…');
+
+                                recorder.ondataavailable = function(ev) {
+                                    if (ev.data && ev.data.size > 0) chunks.push(ev.data);
+                                };
+
+                                recorder.onstop = function() {
+                                    if (autoStopTimer) clearTimeout(autoStopTimer);
+                                    stream.getTracks().forEach(function(t) { t.stop(); });
+                                    btn.text('🎙 Записати голос');
+                                    currentRecorder = null;
+
+                                    var rawBlob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
+                                    if (!rawBlob.size) {
+                                        statusEl.css('color', '#b32d2e').text('Порожній запис, спробуйте ще раз.');
+                                        return;
+                                    }
+                                    statusEl.css('color', '#555').text('Обробка та збереження у WordPress…');
+
+                                    convertBlobToWav(rawBlob).then(function(wavBlob) {
+                                        var fd = new FormData();
+                                        fd.append('action', 'ua_upload_voice_audio');
+                                        fd.append('nonce', uploadAudioNonce);
+                                        fd.append('kind', kind);
+                                        fd.append('audio', wavBlob, 'ua-light-voice-' + kind + '-' + Date.now() + '.wav');
+                                        return fetch(uploadAudioUrl, {
+                                            method: 'POST',
+                                            credentials: 'same-origin',
+                                            body: fd
+                                        });
+                                    }).then(function(r) {
+                                        return r.json();
+                                    }).then(function(res) {
+                                        if (!res || !res.success || !res.data || !res.data.url) {
+                                            throw new Error((res && res.data && res.data.message) || 'Не вдалося зберегти запис.');
+                                        }
+                                        targetInput.val(res.data.url);
+                                        statusEl.css('color', '#155724').text('✔ Запис збережено! Натисніть «Зберегти налаштування» нижче.');
+                                    }).catch(function(err) {
+                                        statusEl.css('color', '#b32d2e').text(err && err.message ? err.message : 'Помилка збереження запису.');
+                                    });
+                                };
+
+                                currentRecorder = {
+                                    button: btn,
+                                    stop: function() {
+                                        if (recorder.state !== 'inactive') recorder.stop();
+                                    }
+                                };
+                                recorder.start();
+                                autoStopTimer = setTimeout(function() {
+                                    if (recorder.state !== 'inactive') recorder.stop();
+                                }, 30000);
+                            }).catch(function() {
+                                statusEl.css('color', '#b32d2e').text('Немає доступу до мікрофона. Дозвольте мікрофон у налаштуваннях браузера.');
+                            });
+                        });
+
                         var voiceSelect = document.getElementById('ua-light-voice-name');
                         var voiceLang = document.getElementById('ua-light-voice-lang');
+                        var voiceGenderSelect = document.getElementById('ua-light-voice-gender');
                         var savedVoiceName = <?php echo wp_json_encode($settings['voice_name']); ?>;
                         var savedVoiceLang = <?php echo wp_json_encode($settings['voice_lang']); ?>;
                         var voiceStatus = document.getElementById('ua-light-voice-status');
+
                         function refreshVoiceList() {
                             if (!voiceSelect || !('speechSynthesis' in window)) return;
                             var voices = window.speechSynthesis.getVoices() || [];
                             var previous = voiceSelect.value || savedVoiceName;
+                            var preferredGender = voiceGenderSelect ? voiceGenderSelect.value : 'female';
                             voiceSelect.innerHTML = '';
+
                             var auto = document.createElement('option');
                             auto.value = '';
-                            auto.textContent = 'Автоматично — перший доступний український голос';
+                            auto.textContent = 'Автоматично — найкращий доступний український голос (Natural / Google)';
                             voiceSelect.appendChild(auto);
-                            voices.forEach(function(voice) {
+
+                            var ukVoices = voices.filter(isUkrainianVoice).sort(function(a, b) {
+                                return scoreUkrainianVoice(b, '', '', preferredGender) - scoreUkrainianVoice(a, '', '', preferredGender);
+                            });
+                            var otherVoices = voices.filter(function(v) { return !isUkrainianVoice(v); });
+
+                            ukVoices.forEach(function(voice) {
                                 var option = document.createElement('option');
                                 option.value = voice.name;
-                                option.textContent = voice.name + ' (' + voice.lang + ')' + (voice.default ? ' — за замовчуванням' : '');
+                                option.textContent = '★ ' + voice.name + ' (' + voice.lang + ')' + (!voice.localService ? ' — якісний онлайн' : '');
                                 option.dataset.lang = voice.lang || '';
                                 voiceSelect.appendChild(option);
                             });
+
+                            if (otherVoices.length) {
+                                var groupOther = document.createElement('optgroup');
+                                groupOther.label = 'Інші голоси браузера (не українські)';
+                                otherVoices.forEach(function(voice) {
+                                    var option = document.createElement('option');
+                                    option.value = voice.name;
+                                    option.textContent = voice.name + ' (' + voice.lang + ')';
+                                    option.dataset.lang = voice.lang || '';
+                                    groupOther.appendChild(option);
+                                });
+                                voiceSelect.appendChild(groupOther);
+                            }
+
                             var match = Array.prototype.find.call(voiceSelect.options, function(option) {
                                 return option.value === previous && (!savedVoiceLang || !option.dataset.lang || option.dataset.lang === savedVoiceLang);
                             });
                             if (match) voiceSelect.value = match.value;
                             var selected = voiceSelect.options[voiceSelect.selectedIndex];
                             if (voiceLang && selected) voiceLang.value = selected.dataset.lang || '';
-                            var uk = voices.filter(function(v) { return /^uk([-_]|$)/i.test(v.lang || ''); });
-                            if (voiceStatus) voiceStatus.textContent = uk.length
-                                ? 'Знайдено українських голосів: ' + uk.length + '. Оберіть конкретний голос і збережіть налаштування.'
-                                : 'Українських голосів у цьому браузері не знайдено. Якість та мова автоматичного голосу не гарантуються.';
+
+                            if (voiceStatus) {
+                                if (ukVoices.length) {
+                                    voiceStatus.style.color = '';
+                                    voiceStatus.textContent = 'Знайдено українських голосів у цьому браузері: ' + ukVoices.length + '. Найкращий у вашому браузері зараз: «' + ukVoices[0].name + '».';
+                                } else {
+                                    voiceStatus.style.color = '#b32d2e';
+                                    voiceStatus.textContent = 'У цьому браузері немає жодного українського голосу. Для бездоганної озвучки оберіть режим «Тільки власний MP3 або запис з мікрофона» і запишіть свій голос вище.';
+                                }
+                            }
                         }
+
                         if ('speechSynthesis' in window) {
                             refreshVoiceList();
                             window.speechSynthesis.onvoiceschanged = refreshVoiceList;
-                            setTimeout(refreshVoiceList, 500);
+                            setTimeout(refreshVoiceList, 400);
                         }
                         if (voiceSelect) voiceSelect.addEventListener('change', function() {
                             var option = voiceSelect.options[voiceSelect.selectedIndex];
                             if (voiceLang) voiceLang.value = option ? (option.dataset.lang || '') : '';
                         });
+                        if (voiceGenderSelect) voiceGenderSelect.addEventListener('change', refreshVoiceList);
+
                         function speakPreview(text) {
                             if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) {
                                 window.alert('Цей браузер не підтримує голосове відтворення.');
                                 return;
                             }
-                            var voices = window.speechSynthesis.getVoices() || [];
                             var chosenName = voiceSelect ? voiceSelect.value : '';
-                            var chosen = voices.find(function(v) { return v.name === chosenName; });
-                            if (!chosen) chosen = voices.find(function(v) { return /^uk([-_]|$)/i.test(v.lang || ''); }) || null;
-                            window.speechSynthesis.cancel();
-                            var utterance = new SpeechSynthesisUtterance(text);
-                            utterance.lang = chosen ? chosen.lang : 'uk-UA';
-                            utterance.volume = <?php echo max(0, min(100, (int) $settings['voice_volume'])) / 100; ?>;
-                            if (chosen) utterance.voice = chosen;
-                            // Delay after cancel avoids a Chrome speech queue race on repeated previews.
-                            setTimeout(function() { window.speechSynthesis.speak(utterance); }, 120);
+                            var chosenLang = voiceLang ? voiceLang.value : '';
+                            var chosenGender = voiceGenderSelect ? voiceGenderSelect.value : 'female';
+                            var rate = parseFloat($('#ua-light-voice-rate').val() || '0.95');
+                            var pitch = parseFloat($('#ua-light-voice-pitch').val() || '1');
+                            var volume = Math.max(0, Math.min(100, parseInt($('#ua-light-voice-volume').val() || '80', 10))) / 100;
+                            var normalized = normalizeUkrainianSpeechText(text, '20:00', '3.1');
+                            $('#ua-light-voice-preview-note').text('Текст для озвучення: «' + normalized + '»');
+
+                            speakUkrainianText(normalized, {
+                                voiceName: chosenName,
+                                voiceLang: chosenLang,
+                                voiceGender: chosenGender,
+                                rate: rate,
+                                pitch: pitch,
+                                volume: volume,
+                                onUnavailable: function() {
+                                    window.alert('У цьому браузері не знайдено українського голосу. Оберіть голос вручну або запишіть власний голос з мікрофона / завантажте MP3.');
+                                }
+                            });
                         }
+
                         $('.ua-light-preview-voice').on('click', function(e) {
                             e.preventDefault();
                             var text = $('#' + $(this).data('target')).val();
                             if (!text) { window.alert('Введіть текст повідомлення.'); return; }
                             speakPreview(text);
                         });
+
                         $('.ua-light-preview-audio').on('click', function(e) {
                             e.preventDefault();
                             var url = $('#' + $(this).data('target')).val();
-                            if (!url) { window.alert('Спочатку оберіть або вкажіть MP3.'); return; }
+                            if (!url) { window.alert('Спочатку оберіть, запишіть або вкажіть аудіофайл.'); return; }
+                            if (activePreviewAudio) {
+                                activePreviewAudio.pause();
+                                activePreviewAudio = null;
+                            }
                             var audio = new Audio(url);
-                            audio.volume = <?php echo max(0, min(100, (int) $settings['sound_volume'])) / 100; ?>;
+                            activePreviewAudio = audio;
+                            audio.volume = Math.max(0, Math.min(100, parseInt($('#ua-light-sound-volume').val() || '80', 10))) / 100;
                             audio.play().catch(function() { window.alert('Браузер не дозволив відтворити файл. Перевірте посилання.'); });
                         });
                     });
@@ -514,6 +1110,8 @@ final class UA_Light_Alert {
                     <?php submit_button('Зберегти налаштування', 'primary', 'ua_save_settings'); ?>
                 </form>
             </div>
+
+            <?php UA_Light_Alert_Mobile_API::render_admin_section(); ?>
 
             <div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap;">
                 <div style="flex:1;min-width:300px;background:#fff;padding:20px;border:1px solid #ccd0d4;">
@@ -689,6 +1287,13 @@ final class UA_Light_Alert {
      * ------------------------------------------------------ */
 
     public function render_frontend() {
+        if (is_singular() && !is_admin()) {
+            $current_url = get_permalink();
+            if ($current_url && get_option('ua_light_schedule_page_url', '') !== $current_url) {
+                update_option('ua_light_schedule_page_url', esc_url_raw($current_url), false);
+            }
+        }
+
         $settings = $this->get_settings();
 
         $notice_minutes = absint($settings['notice_minutes']);
@@ -733,11 +1338,20 @@ final class UA_Light_Alert {
                 </button>
 
                 <div class="ua-pwa-install-wrap">
-                    <button type="button" id="ua-pwa-install" class="ua-pwa-install" aria-label="Встановити додаток Графік відключень">
-                        <span class="ua-pwa-install-icon" aria-hidden="true">⬇</span>
-                        Встановити додаток Графік відключень
+                    <button type="button" id="ua-pwa-install" class="ua-pwa-install" aria-label="Створити іконку">
+                        <span class="ua-pwa-install-icon" aria-hidden="true">📲</span>
+                        Створити іконку
                     </button>
-                    <p id="ua-pwa-install-help" class="ua-pwa-install-help" hidden></p>
+                    <?php
+                    $mobile_settings = UA_Light_Alert_Mobile_API::get_mobile_settings();
+                    if (!empty($mobile_settings['apk_download_url'])) :
+                    ?>
+                        <a href="<?php echo esc_url($mobile_settings['apk_download_url']); ?>" class="ua-pwa-install" style="margin-top:8px;background:#222;text-decoration:none;" download>
+                            <span class="ua-pwa-install-icon" aria-hidden="true">🤖</span>
+                            Завантажити Android-додаток (.apk)
+                        </a>
+                    <?php endif; ?>
+                    <div id="ua-pwa-install-help" class="ua-pwa-install-help" role="status" aria-live="polite" hidden></div>
                 </div>
 
                 <p class="ua-help">
@@ -790,7 +1404,27 @@ final class UA_Light_Alert {
             .ua-light-widget .ua-pwa-install:hover { background: #e85f00; }
             .ua-light-widget .ua-pwa-install:focus-visible { outline: 3px solid #222; outline-offset: 3px; }
             .ua-pwa-install-icon { font-size: 20px; line-height: 1; }
-            .ua-pwa-install-help { margin: 9px 0 0; font-size: 14px; line-height: 1.5; }
+            .ua-pwa-install-help {
+                margin: 10px 0 0;
+                padding: 10px 12px;
+                border-left: 4px solid #ff6b00;
+                border-radius: 6px;
+                background: #fff7f0;
+                color: #222;
+                font-size: 14px;
+                line-height: 1.5;
+                max-width: 420px;
+            }
+            .ua-pwa-install-help.is-success {
+                border-left-color: #1e7e34;
+                background: #edf9f0;
+                color: #155724;
+            }
+            .ua-pwa-install-help.is-info {
+                border-left-color: #0c5460;
+                background: #e8f4ff;
+                color: #17466b;
+            }
             .ua-field {
                 display: block;
                 margin-bottom: 14px;
@@ -931,10 +1565,13 @@ final class UA_Light_Alert {
             var ticker = null;
             var refreshTicker = null;
             var noticeMinutes = <?php echo (int) $notice_minutes; ?>;
+            var alertMode = <?php echo wp_json_encode($settings['alert_mode']); ?>;
             var voiceEnabled = <?php echo !empty($settings['voice_enabled']) ? 'true' : 'false'; ?>;
             var voiceGender = <?php echo wp_json_encode($settings['voice_gender']); ?>;
             var voiceName = <?php echo wp_json_encode($settings['voice_name']); ?>;
             var voiceLang = <?php echo wp_json_encode($settings['voice_lang']); ?>;
+            var voiceRate = <?php echo wp_json_encode((float) $settings['voice_rate']); ?>;
+            var voicePitch = <?php echo wp_json_encode((float) $settings['voice_pitch']); ?>;
             var voiceTextOff = <?php echo wp_json_encode($settings['voice_text_off']); ?>;
             var voiceTextOn = <?php echo wp_json_encode($settings['voice_text_on']); ?>;
             var voiceVolume = <?php echo max(0, min(100, (int) $settings['voice_volume'])) / 100; ?>;
@@ -955,93 +1592,200 @@ final class UA_Light_Alert {
             var pushSubscribeUrl = <?php echo wp_json_encode($push_subscribe_url); ?>;
             var installButton = document.getElementById('ua-pwa-install');
             var installHelp = document.getElementById('ua-pwa-install-help');
-            var deferredInstallPrompt = null;
+            var pwaInstalledFlagKey = 'ua_light_pwa_installed_v1';
+            var deferredInstallPrompt = window.uaDeferredInstallPrompt || null;
 
             function isPwaInstalled() {
-                return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)
-                    || window.navigator.standalone === true;
+                if (window.navigator.standalone === true) return true;
+                if (!window.matchMedia) return false;
+                return ['standalone', 'window-controls-overlay', 'minimal-ui', 'fullscreen'].some(function(mode) {
+                    return window.matchMedia('(display-mode: ' + mode + ')').matches;
+                });
             }
 
-            // Chromium can detect an already-installed copy of this PWA even when the user opens the website in a normal browser tab.
-            function hideButtonIfRelatedPwaIsInstalled() {
-                if (!navigator.getInstalledRelatedApps || isPwaInstalled()) return;
-                navigator.getInstalledRelatedApps().then(function(apps) {
-                    if (!Array.isArray(apps)) return;
-                    // getInstalledRelatedApps() only returns apps explicitly declared
-                    // in this manifest, so matching the platform is sufficient. Do not
-                    // reject older installs merely because Chrome derived a legacy app id.
-                    var installed = apps.some(function(app) {
+            function readInstalledFlag() {
+                try {
+                    return localStorage.getItem(pwaInstalledFlagKey) === '1';
+                } catch (e) {
+                    return false;
+                }
+            }
+
+            function writeInstalledFlag(installed) {
+                try {
+                    if (installed) {
+                        localStorage.setItem(pwaInstalledFlagKey, '1');
+                    } else {
+                        localStorage.removeItem(pwaInstalledFlagKey);
+                    }
+                } catch (e) {}
+            }
+
+            function checkRelatedInstalledApps() {
+                if (!navigator.getInstalledRelatedApps) {
+                    return Promise.resolve(false);
+                }
+                return navigator.getInstalledRelatedApps().then(function(apps) {
+                    if (!Array.isArray(apps)) return false;
+                    return apps.some(function(app) {
                         return app && app.platform === 'webapp';
                     });
-                    if (installed) hideInstallButton();
-                }).catch(function() {});
+                }).catch(function() {
+                    return false;
+                });
             }
 
-            function hideInstallButton() {
-                if (installButton) installButton.style.display = 'none';
-                if (installHelp) installHelp.hidden = true;
-            }
-
-            function showInstallHelp(message) {
+            function showInstallHelp(message, variant) {
                 if (!installHelp) return;
                 installHelp.textContent = message;
+                installHelp.className = 'ua-pwa-install-help' + (variant ? ' is-' + variant : '');
                 installHelp.hidden = false;
             }
 
-            if (isPwaInstalled()) {
-                hideInstallButton();
-            } else {
-                hideButtonIfRelatedPwaIsInstalled();
-                var initialUa = window.navigator.userAgent || '';
-                var isIosInstall = /iphone|ipad|ipod/i.test(initialUa);
-                // Keep the install button visible on all supported devices. Chromium's native prompt is used when available; iOS shows its own instructions.
-                if (installButton) {
-                    installButton.hidden = false;
-                    installButton.style.display = 'inline-flex';
+            function getManualInstallMessage() {
+                var ua = window.navigator.userAgent || '';
+                var isInApp = /FBAN|FBAV|Instagram|Telegram|Viber|WhatsApp|Line\/|Twitter|TikTok|; wv\)/i.test(ua);
+                if (isInApp) {
+                    return 'Ви відкрили сторінку у вбудованому браузері. Натисніть меню (⋮ або ⋯) → «Відкрити в Chrome» або «Відкрити в Safari», а потім натисніть «Створити іконку».';
                 }
+                var isIos = /iphone|ipad|ipod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+                if (isIos) {
+                    if (/CriOS|FxiOS|EdgiOS/i.test(ua)) {
+                        return 'На iPhone/iPad натисніть «Поділитися» (значок зі стрілкою вгору біля адресного рядка) → «На початковий екран» → «Додати» (або відкрийте сторінку в Safari).';
+                    }
+                    return 'Щоб створити іконку на iPhone/iPad: натисніть «Поділитися» (квадрат зі стрілкою вгору в Safari) → «На початковий екран» → «Додати».';
+                }
+                var isAndroid = /android/i.test(ua);
+                if (isAndroid) {
+                    if (/firefox|fxios/i.test(ua)) {
+                        return 'У Firefox на Android натисніть меню ⋮ → «Встановити» (або «Додати на головний екран»).';
+                    }
+                    return 'Натисніть меню ⋮ у правому верхньому куті браузера → «Додати на головний екран» → «Встановити» (якщо там відображається «Відкрити застосунок» — іконка вже є).';
+                }
+                var isSafariMac = /safari/i.test(ua) && !/chrome|chromium|crios|edg|opr|opera/i.test(ua);
+                if (isSafariMac) {
+                    return 'У Safari натисніть у верхньому меню «Файл» → «Додати в Dock» (або кнопку «Поділитися» → «Додати в Dock»).';
+                }
+                if (/firefox/i.test(ua)) {
+                    return 'Firefox на комп’ютері не підтримує автоматичне створення ярликів сайтів. Відкрийте цю сторінку в Google Chrome або Microsoft Edge та натисніть «Створити іконку».';
+                }
+                return 'Натисніть значок встановлення у правому краю адресного рядка браузера або відкрийте меню ⋮ → «Зберегти й поділитися» → «Встановити сторінку як додаток». Якщо у меню вказано «Відкрити в…» — іконка вже створена.';
+            }
 
-                window.addEventListener('beforeinstallprompt', function(event) {
-                    event.preventDefault();
-                    deferredInstallPrompt = event;
-                    if (installButton) {
-                        installButton.hidden = false;
-                        installButton.style.display = 'inline-flex';
+            function triggerNativeInstallPrompt(promptEvent) {
+                deferredInstallPrompt = null;
+                window.uaDeferredInstallPrompt = null;
+                writeInstalledFlag(false);
+                promptEvent.prompt();
+                return promptEvent.userChoice.then(function(choice) {
+                    if (choice && choice.outcome === 'accepted') {
+                        writeInstalledFlag(true);
+                        showInstallHelp('✔ Іконку «Графік світла» створено на вашому пристрої!', 'success');
+                    } else {
+                        showInstallHelp('Створення іконки скасовано. Натисніть «Створити іконку» ще раз, коли будете готові.', '');
+                    }
+                }).catch(function() {
+                    showInstallHelp(getManualInstallMessage(), '');
+                });
+            }
+
+            function waitForInstallPrompt(timeoutMs) {
+                if (deferredInstallPrompt || window.uaDeferredInstallPrompt) {
+                    return Promise.resolve(deferredInstallPrompt || window.uaDeferredInstallPrompt);
+                }
+                return new Promise(function(resolve) {
+                    var done = false;
+                    var timer = setTimeout(function() {
+                        if (done) return;
+                        done = true;
+                        window.removeEventListener('ua-install-ready', onReady);
+                        resolve(deferredInstallPrompt || window.uaDeferredInstallPrompt || null);
+                    }, timeoutMs);
+                    function onReady() {
+                        if (done) return;
+                        done = true;
+                        clearTimeout(timer);
+                        window.removeEventListener('ua-install-ready', onReady);
+                        resolve(deferredInstallPrompt || window.uaDeferredInstallPrompt || null);
+                    }
+                    window.addEventListener('ua-install-ready', onReady);
+                    registerPwaServiceWorker();
+                });
+            }
+
+            if (isPwaInstalled()) {
+                writeInstalledFlag(true);
+            } else {
+                checkRelatedInstalledApps().then(function(installed) {
+                    if (installed && !deferredInstallPrompt && !window.uaDeferredInstallPrompt) {
+                        writeInstalledFlag(true);
                     }
                 });
+            }
 
-                window.addEventListener('appinstalled', function() {
-                    deferredInstallPrompt = null;
-                    hideInstallButton();
-                });
-
-                if (installButton) {
-                    installButton.addEventListener('click', function() {
-                        if (isPwaInstalled()) {
-                            hideInstallButton();
-                            return;
-                        }
-
-                        if (deferredInstallPrompt) {
-                            var promptEvent = deferredInstallPrompt;
-                            deferredInstallPrompt = null;
-                            promptEvent.prompt();
-                            promptEvent.userChoice.then(function(choice) {
-                                if (choice && choice.outcome === 'accepted') {
-                                    hideInstallButton();
-                                }
-                            }).catch(function() {});
-                            return;
-                        }
-
-                        var ua = window.navigator.userAgent || '';
-                        var isIos = /iphone|ipad|ipod/i.test(ua);
-                        if (isIos) {
-                            showInstallHelp('Щоб встановити додаток на iPhone: натисніть «Поділитися» у Safari, потім «На початковий екран» і «Додати».');
-                        } else {
-                            showInstallHelp('Встановлення через Chrome ще не готове. Переконайтеся, що відкрили сайт у Chrome, а не у вбудованому браузері. Якщо кнопка не відкриває системне вікно, оновіть сторінку та натисніть її ще раз.');
-                        }
-                    });
+            window.addEventListener('ua-install-ready', function() {
+                if (window.uaDeferredInstallPrompt) {
+                    deferredInstallPrompt = window.uaDeferredInstallPrompt;
+                    writeInstalledFlag(false);
                 }
+            });
+
+            window.addEventListener('beforeinstallprompt', function(event) {
+                event.preventDefault();
+                deferredInstallPrompt = event;
+                window.uaDeferredInstallPrompt = event;
+                // Chromium only fires beforeinstallprompt when the app is NOT installed.
+                writeInstalledFlag(false);
+            });
+
+            window.addEventListener('ua-app-installed', function() {
+                deferredInstallPrompt = null;
+                writeInstalledFlag(true);
+                showInstallHelp('✔ Іконку «Графік світла» створено на вашому пристрої!', 'success');
+            });
+
+            window.addEventListener('appinstalled', function() {
+                deferredInstallPrompt = null;
+                window.uaDeferredInstallPrompt = null;
+                writeInstalledFlag(true);
+                showInstallHelp('✔ Іконку «Графік світла» створено на вашому пристрої!', 'success');
+            });
+
+            if (installButton) {
+                installButton.addEventListener('click', function() {
+                    if (isPwaInstalled()) {
+                        writeInstalledFlag(true);
+                        showInstallHelp('✔ Іконка «Графік світла» вже створена — зараз ви відкрили сторінку саме через неї.', 'info');
+                        return;
+                    }
+
+                    var promptEvent = deferredInstallPrompt || window.uaDeferredInstallPrompt;
+                    if (promptEvent) {
+                        triggerNativeInstallPrompt(promptEvent);
+                        return;
+                    }
+
+                    installButton.disabled = true;
+                    waitForInstallPrompt(1200).then(function(readyPrompt) {
+                        installButton.disabled = false;
+                        if (readyPrompt) {
+                            triggerNativeInstallPrompt(readyPrompt);
+                            return;
+                        }
+                        return checkRelatedInstalledApps().then(function(installedRelated) {
+                            if (installedRelated) {
+                                writeInstalledFlag(true);
+                                showInstallHelp('✔ Іконка «Графік світла» вже є на вашому пристрої. Якщо ви її видалили, натисніть меню браузера ⋮ → «Додати на головний екран» / «Встановити застосунок».', 'info');
+                                return;
+                            }
+                            if (readInstalledFlag()) {
+                                showInstallHelp('✔ Іконка «Графік світла» вже була створена на цьому пристрої. Якщо ви видалили її раніше — натисніть значок встановлення в правому краю адресного рядка або меню ⋮ → «Встановити».', 'info');
+                                return;
+                            }
+                            showInstallHelp(getManualInstallMessage(), '');
+                        });
+                    });
+                });
             }
 
             var storageKey = 'ua_light_alert_selection_v1';
@@ -1390,29 +2134,21 @@ final class UA_Light_Alert {
                 if (!('serviceWorker' in navigator)) {
                     return Promise.resolve(null);
                 }
-                return navigator.serviceWorker.register(serviceWorkerUrl, {scope: serviceWorkerScope})
+                if (window.uaSwRegPromise) {
+                    return window.uaSwRegPromise.then(function(registration) {
+                        if (registration) {
+                            serviceWorkerRegistration = registration;
+                        }
+                        return registration;
+                    });
+                }
+                window.uaSwRegPromise = navigator.serviceWorker.register(serviceWorkerUrl, {scope: serviceWorkerScope})
                     .then(function(registration) {
                         serviceWorkerRegistration = registration;
-
-                        // When this is the first visit (or the worker was just updated),
-                        // let the new worker activate, then reload once so Chromium can
-                        // evaluate installability with an active fetch handler.
-                        var worker = registration.installing;
-                        if (worker) {
-                            worker.addEventListener('statechange', function() {
-                                if (worker.state !== 'activated') return;
-                                try {
-                                    var reloadKey = 'ua_light_pwa_sw_activated_' + serviceWorkerScope;
-                                    if (!sessionStorage.getItem(reloadKey)) {
-                                        sessionStorage.setItem(reloadKey, '1');
-                                        window.location.reload();
-                                    }
-                                } catch (e) {}
-                            });
-                        }
                         return registration;
                     })
                     .catch(function() { return null; });
+                return window.uaSwRegPromise;
             }
 
             function urlBase64ToUint8Array(base64String) {
@@ -1475,17 +2211,11 @@ final class UA_Light_Alert {
                 return start < end ? (current >= start && current < end) : (current >= start || current < end);
             }
 
-            function selectPreferredSpeechVoice() {
-                if (!('speechSynthesis' in window)) return null;
-                var voices = window.speechSynthesis.getVoices() || [];
-                if (voiceName) {
-                    var exact = voices.find(function(v) {
-                        return v.name === voiceName && (!voiceLang || v.lang === voiceLang);
-                    });
-                    if (exact) return exact;
-                }
-                return voices.find(function(v) { return /^uk([-_]|$)/i.test(v.lang || ''); })
-                    || voices.find(function(v) { return v.default; }) || null;
+            <?php echo $this->get_speech_helper_js(); ?>
+
+            if ('speechSynthesis' in window && window.speechSynthesis.getVoices) {
+                window.speechSynthesis.getVoices();
+                window.speechSynthesis.addEventListener('voiceschanged', function() {});
             }
 
             function sendActivePageAlert(message, event) {
@@ -1494,57 +2224,89 @@ final class UA_Light_Alert {
                 if (isQuietHoursNow()) return;
 
                 var soundUrl = event.status === 'yes' ? soundUrls.on : soundUrls.off;
-                if (!soundUrl) {
-                    playDefaultAlertTone(event.status);
-                }
-                if (soundEl && soundUrl) {
-                    soundEl.pause();
-                    soundEl.src = soundUrl;
-                    soundEl.volume = soundVolume;
-                    var remainingPlays = alertRepeat + 1;
-                    soundEl.onended = function() {
-                        remainingPlays--;
-                        if (remainingPlays > 0) {
-                            soundEl.currentTime = 0;
-                            soundEl.play().catch(function() {});
-                        } else {
-                            soundEl.onended = null;
-                        }
-                    };
-                    soundEl.currentTime = 0;
-                    soundEl.play().catch(function() {});
+                var shouldSpeak = (alertMode === 'speech' || alertMode === 'both') && voiceEnabled
+                    && 'speechSynthesis' in window && 'SpeechSynthesisUtterance' in window;
+                var shouldPlayAudio = (alertMode === 'audio' || alertMode === 'both');
+                var speechStarted = false;
+
+                function startVoiceAnnouncement() {
+                    if (speechStarted || !shouldSpeak || isQuietHoursNow()) return;
+                    speechStarted = true;
+                    var eventTime = String(event.time.getHours()).padStart(2, '0') + ':' +
+                        String(event.time.getMinutes()).padStart(2, '0');
+                    var customText = event.status === 'yes' ? voiceTextOn : voiceTextOff;
+                    var normalizedText = normalizeUkrainianSpeechText(customText || message, eventTime, activeGroup);
+
+                    var remainingCopies = alertRepeat + 1;
+                    function speakNextCopy() {
+                        if (remainingCopies <= 0 || isQuietHoursNow()) return;
+                        speakUkrainianText(normalizedText, {
+                            voiceName: voiceName,
+                            voiceLang: voiceLang,
+                            voiceGender: voiceGender,
+                            rate: voiceRate,
+                            pitch: voicePitch,
+                            volume: voiceVolume,
+                            onEnd: function() {
+                                remainingCopies--;
+                                if (remainingCopies > 0 && !isQuietHoursNow()) {
+                                    setTimeout(speakNextCopy, 400);
+                                }
+                            },
+                            onUnavailable: function() {
+                                remainingCopies = 0;
+                                // If the visitor has no Ukrainian TTS voice in speech-only mode, play fallback sound.
+                                if (alertMode === 'speech') {
+                                    if (soundEl && soundUrl) {
+                                        soundEl.src = soundUrl;
+                                        soundEl.volume = soundVolume;
+                                        soundEl.play().catch(function() { playDefaultAlertTone(event.status); });
+                                    } else {
+                                        playDefaultAlertTone(event.status);
+                                    }
+                                }
+                            }
+                        });
+                    }
+                    speakNextCopy();
                 }
 
-                if (voiceEnabled && 'speechSynthesis' in window && 'SpeechSynthesisUtterance' in window) {
-                    try {
-                        window.speechSynthesis.cancel();
-                        var eventTime = String(event.time.getHours()).padStart(2, '0') + ':' +
-                            String(event.time.getMinutes()).padStart(2, '0');
-                        var customText = event.status === 'yes' ? voiceTextOn : voiceTextOff;
-                        var spokenText = (customText || message).replace(/\\{time\\}/g, eventTime);
-                        if (spokenText.indexOf(eventTime) === -1) {
-                            spokenText += '. Час за графіком: ' + eventTime + '.';
+                if (shouldPlayAudio) {
+                    if (!soundUrl) {
+                        playDefaultAlertTone(event.status);
+                        if (shouldSpeak) {
+                            setTimeout(startVoiceAnnouncement, (alertRepeat + 1) * 650);
                         }
-                        var selectedVoice = selectPreferredSpeechVoice();
-                        var speakRemaining = alertRepeat + 1;
-                        function speakNextCopy() {
-                            if (speakRemaining <= 0 || isQuietHoursNow()) return;
-                            var spoken = new SpeechSynthesisUtterance(spokenText);
-                            spoken.lang = selectedVoice ? selectedVoice.lang : 'uk-UA';
-                            spoken.volume = voiceVolume;
-                            if (selectedVoice) spoken.voice = selectedVoice;
-                            spoken.onend = function() {
-                                speakRemaining--;
-                                if (speakRemaining > 0 && !isQuietHoursNow()) {
-                                    setTimeout(speakNextCopy, 350);
-                                }
-                            };
-                            spoken.onerror = function() { speakRemaining = 0; };
-                            window.speechSynthesis.speak(spoken);
+                    } else if (soundEl) {
+                        soundEl.pause();
+                        soundEl.src = soundUrl;
+                        soundEl.volume = soundVolume;
+                        var remainingPlays = alertRepeat + 1;
+                        var safetyTimer = null;
+                        function finishSoundChain() {
+                            if (safetyTimer) { clearTimeout(safetyTimer); safetyTimer = null; }
+                            soundEl.onended = null;
+                            if (shouldSpeak) {
+                                setTimeout(startVoiceAnnouncement, 250);
+                            }
                         }
-                        // Chrome can briefly retain a cancelled utterance; start a fresh queue after a short delay.
-                        setTimeout(speakNextCopy, 150);
-                    } catch (e) {}
+                        soundEl.onended = function() {
+                            remainingPlays--;
+                            if (remainingPlays > 0) {
+                                soundEl.currentTime = 0;
+                                soundEl.play().catch(finishSoundChain);
+                            } else {
+                                finishSoundChain();
+                            }
+                        };
+                        soundEl.currentTime = 0;
+                        if (shouldSpeak) {
+                            safetyTimer = setTimeout(startVoiceAnnouncement, 8000);
+                        }
+                        soundEl.play().catch(finishSoundChain);
+                    }
+                } else if (shouldSpeak) {
+                    startVoiceAnnouncement();
                 }
                 if (navigator.vibrate) navigator.vibrate([250, 120, 250]);
 
@@ -1556,7 +2318,7 @@ final class UA_Light_Alert {
                         if (registration && registration.showNotification) {
                             registration.showNotification(title, {
                                 body: body,
-                                icon: '<?php echo esc_js(get_site_icon_url(192)); ?>',
+                                icon: '<?php echo esc_js(get_site_icon_url(192) ?: plugin_dir_url(__FILE__) . 'assets/icons/ua-light-alert-icon-192.png'); ?>',
                                 tag: event.key,
                                 renotify: false,
                                 data: {url: window.location.href}
@@ -1991,6 +2753,7 @@ final class UA_Light_Alert_GitHub_Updater {
 new UA_Light_Alert();
 new UA_Light_Alert_GitHub_Updater();
 new UA_Light_Alert_Push();
+new UA_Light_Alert_Mobile_API();
 register_activation_hook(__FILE__, ['UA_Light_Alert_Push', 'activate']);
 register_deactivation_hook(__FILE__, ['UA_Light_Alert_Push', 'deactivate']);
 

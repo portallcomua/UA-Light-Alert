@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.UALightAlert" parent="Theme.Material3.Light.NoActionBar">
+        <item name="colorPrimary">@color/brand_orange</item>
+        <item name="colorOnPrimary">@android:color/white</item>
+        <item name="android:windowBackground">@color/surface_bg</item>
+        <item name="android:statusBarColor">@color/brand_orange</item>
+    </style>
+
+    <style name="Theme.UALightAlert.Alert" parent="Theme.Material3.Light.NoActionBar">
+        <item name="colorPrimary">@color/brand_orange</item>
+        <item name="colorOnPrimary">@android:color/white</item>
+        <item name="android:windowBackground">@color/ink_primary</item>
+        <item name="android:statusBarColor">@color/ink_primary</item>
+    </style>
+</resources>

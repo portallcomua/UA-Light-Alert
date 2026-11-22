@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Графік світла</string>
+    <string name="alert_channel_name">Екстрені голосові сповіщення</string>
+    <string name="alert_channel_desc">Автоматичне відкриття та голосове попередження перед зміною стану світла</string>
+    <string name="status_channel_name">Синхронізація графіка</string>
+</resources>

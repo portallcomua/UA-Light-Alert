@@ -9,6 +9,17 @@ self.addEventListener('activate', function(event) {
     event.waitUntil(self.clients.claim());
 });
 
+// A fetch handler is required by older Chromium versions for PWA installability.
+// Keep requests network-first and preserve normal browser caching behavior.
+self.addEventListener('fetch', function(event) {
+    if (event.request.method !== 'GET') return;
+    event.respondWith(
+        fetch(event.request).catch(function() {
+            return caches.match(event.request);
+        })
+    );
+});
+
 self.addEventListener('push', function(event) {
     var payload = {};
     if (event.data) {

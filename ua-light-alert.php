@@ -2,7 +2,7 @@
 /**
  * Plugin Name: UA Light Alert
  * Description: Графіки відключень, CRM рекламодавців та сповіщення про зміни електропостачання.
- * Version: 4.4.3
+ * Version: 4.4.4
  * Plugin URI: https://uaserver.pp.ua/svitlo/
  * Update URI: https://github.com/portallcomua/UA-Light-Alert
  * Author: UAServer
@@ -336,7 +336,7 @@ final class UA_Light_Alert {
                                     placeholder="https://example.com/off.mp3">
                                 <button type="button" class="button ua-light-select-audio" data-target="ua-light-sound-off">Обрати MP3 з пристрою</button>
                                 <button type="button" class="button ua-light-preview-audio" data-target="ua-light-sound-off">Прослухати</button>
-                                <p class="description">Можна вибрати файл із медіатеки/пристрою або вставити пряме посилання на MP3.</p>
+                                <p class="description">Можна вибрати MP3. Якщо файл не задано, плагін відтворить вбудований короткий сигнал.</p>
                             </td>
                         </tr>
                         <tr>
@@ -347,7 +347,7 @@ final class UA_Light_Alert {
                                     placeholder="https://example.com/on.mp3">
                                 <button type="button" class="button ua-light-select-audio" data-target="ua-light-sound-on">Обрати MP3 з пристрою</button>
                                 <button type="button" class="button ua-light-preview-audio" data-target="ua-light-sound-on">Прослухати</button>
-                                <p class="description">Звук, який відтворюється перед відновленням електропостачання.</p>
+                                <p class="description">Окремий MP3 перед запланованим відновленням. Якщо файл не задано — вбудований висхідний сигнал.</p>
                             </td>
                         </tr>
                     
@@ -750,6 +750,43 @@ final class UA_Light_Alert {
             var timerText = document.getElementById('ua-timer-text');
             var noticeBox = document.getElementById('ua-notice');
             var soundEl = document.getElementById('ua-alert-sound');
+            var alertAudioContext = null;
+
+            function unlockAlertAudio() {
+                var AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                if (!AudioContextClass) return;
+                try {
+                    if (!alertAudioContext) alertAudioContext = new AudioContextClass();
+                    if (alertAudioContext.state === 'suspended') {
+                        alertAudioContext.resume().catch(function() {});
+                    }
+                } catch (e) {}
+            }
+
+            function playDefaultAlertTone(status) {
+                if (!alertAudioContext || soundVolume <= 0) return;
+                if (alertAudioContext.state === 'suspended') {
+                    alertAudioContext.resume().catch(function() {});
+                }
+                var notes = status === 'yes' ? [523.25, 659.25, 783.99] : [783.99, 587.33, 440];
+                var spacing = 0.19;
+                for (var repeat = 0; repeat <= alertRepeat; repeat++) {
+                    notes.forEach(function(frequency, index) {
+                        var startAt = alertAudioContext.currentTime + (repeat * notes.length + index) * spacing;
+                        var oscillator = alertAudioContext.createOscillator();
+                        var gain = alertAudioContext.createGain();
+                        oscillator.type = 'sine';
+                        oscillator.frequency.setValueAtTime(frequency, startAt);
+                        gain.gain.setValueAtTime(0.0001, startAt);
+                        gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, soundVolume * 0.18), startAt + 0.02);
+                        gain.gain.exponentialRampToValueAtTime(0.0001, startAt + 0.15);
+                        oscillator.connect(gain);
+                        gain.connect(alertAudioContext.destination);
+                        oscillator.start(startAt);
+                        oscillator.stop(startAt + 0.16);
+                    });
+                }
+            }
 
             var currentData = null;
             var currentGroupData = null;
@@ -888,6 +925,7 @@ final class UA_Light_Alert {
             });
 
             showButton.addEventListener('click', function() {
+                unlockAlertAudio();
                 if (!regionSelect.value) {
                     alert('Оберіть область.');
                     return;
@@ -1195,6 +1233,9 @@ final class UA_Light_Alert {
                 if (isQuietHoursNow()) return;
 
                 var soundUrl = event.status === 'yes' ? soundUrls.on : soundUrls.off;
+                if (!soundUrl) {
+                    playDefaultAlertTone(event.status);
+                }
                 if (soundEl && soundUrl) {
                     soundEl.pause();
                     soundEl.src = soundUrl;

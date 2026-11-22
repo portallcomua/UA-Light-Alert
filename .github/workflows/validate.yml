@@ -20,6 +20,8 @@ jobs:
           php-version: '8.1'
       - name: PHP syntax check
         run: find . -type f -name '*.php' -not -path './dist/*' -print0 | xargs -0 -n1 php -l
+      - name: Web Push cryptography regression test
+        run: php tests/push-crypto-test.php
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:

@@ -42,7 +42,7 @@ final class UA_Light_Alert {
             $start_page = home_url('/');
         }
         $manifest_url = add_query_arg(
-            ['ua_light_manifest' => '1', 'ua_light_start' => rawurlencode($start_page)],
+            ['ua_light_manifest' => '1', 'ua_light_start' => $start_page],
             home_url('/')
         );
         echo '<link rel="manifest" href="' . esc_url($manifest_url) . '">' . "\n";

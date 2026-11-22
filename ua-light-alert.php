@@ -1355,6 +1355,20 @@ final class UA_Light_Alert_GitHub_Updater {
         return $release;
     }
 
+    private function get_release_package($release, $version) {
+        $asset_name = self::SLUG . '-' . $version . '.zip';
+        if (!empty($release['assets']) && is_array($release['assets'])) {
+            foreach ($release['assets'] as $asset) {
+                if (!empty($asset['name']) && $asset['name'] === $asset_name && !empty($asset['browser_download_url'])) {
+                    return esc_url_raw($asset['browser_download_url']);
+                }
+            }
+        }
+        return !empty($release['zipball_url'])
+            ? esc_url_raw($release['zipball_url'])
+            : 'https://github.com/' . self::REPOSITORY . '/archive/refs/tags/' . rawurlencode($release['tag_name']) . '.zip';
+    }
+
     private function get_update_object() {
         $release = $this->get_release();
         if (!$release) {
@@ -1370,9 +1384,7 @@ final class UA_Light_Alert_GitHub_Updater {
             return false;
         }
 
-        $package = !empty($release['zipball_url'])
-            ? $release['zipball_url']
-            : 'https://github.com/' . self::REPOSITORY . '/archive/refs/tags/' . rawurlencode($release['tag_name']) . '.zip';
+        $package = $this->get_release_package($release, $version);
 
         return (object) [
             'id' => 'https://github.com/' . self::REPOSITORY,
@@ -1470,9 +1482,7 @@ final class UA_Light_Alert_GitHub_Updater {
         }
 
         $version = ltrim((string) $release['tag_name'], "vV");
-        $download = !empty($release['zipball_url'])
-            ? $release['zipball_url']
-            : 'https://github.com/' . self::REPOSITORY . '/archive/refs/tags/' . rawurlencode($release['tag_name']) . '.zip';
+        $download = $this->get_release_package($release, $version);
 
         return (object) [
             'name' => 'UA Light Alert',

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: UA Light Alert
  * Description: Графіки відключень, CRM рекламодавців та сповіщення про зміни електропостачання.
- * Version: 4.2.3
+ * Version: 4.3.0
  * Update URI: https://github.com/portallcomua/UA-Light-Alert
  * Author: UA Tools
  * Text Domain: ua-light-alert
@@ -11,6 +11,8 @@
 if (!defined('ABSPATH')) {
     exit;
 }
+
+require_once plugin_dir_path(__FILE__) . 'includes/class-ua-light-alert-push.php';
 
 final class UA_Light_Alert {
 
@@ -222,6 +224,7 @@ final class UA_Light_Alert {
 
     public function render_admin_page() {
         wp_enqueue_media();
+        $push_count = UA_Light_Alert_Push::get_subscription_count();
         $ads = get_option($this->option_key, []);
         if (!is_array($ads)) {
             $ads = [];
@@ -234,6 +237,11 @@ final class UA_Light_Alert {
         ?>
         <div class="wrap">
             <h1>Графік світла — Налаштування та рекламодавці</h1>
+            <div class="notice notice-info">
+                <p><strong>Фонові сповіщення:</strong> активних push-підписок — <?php echo absint($push_count); ?>.
+                Після дозволу браузера сповіщення надходитимуть і коли сторінка закрита, якщо сайт працює через HTTPS та серверний WP-Cron виконується щохвилини.
+                Коли сторінка закрита, звук визначається налаштуваннями сповіщень пристрою; довільний MP3 браузер не може примусово програвати у фоні.</p>
+            </div>
 
             <?php if (isset($_GET['msg'])) : ?>
                 <div class="notice notice-success is-dismissible">
@@ -493,6 +501,8 @@ final class UA_Light_Alert {
 
         $notice_minutes = absint($settings['notice_minutes']);
         $sound_off_url = esc_url($settings['sound_off_url']);
+        $push_public_key = UA_Light_Alert_Push::get_public_key();
+        $push_subscribe_url = rest_url('ua-light-alert/v1/subscribe');
         $sound_on_url = esc_url($settings['sound_on_url']);
         $service_worker_url = add_query_arg('ua_light_sw', '1', home_url('/'));
         $service_worker_scope = home_url('/');
@@ -670,6 +680,8 @@ final class UA_Light_Alert {
             var serviceWorkerRegistration = null;
             var ajaxUrl = <?php echo wp_json_encode($ajax_url); ?>;
             var ajaxNonce = <?php echo wp_json_encode($nonce); ?>;
+            var vapidPublicKey = <?php echo wp_json_encode($push_public_key); ?>;
+            var pushSubscribeUrl = <?php echo wp_json_encode($push_subscribe_url); ?>;
 
             var storageKey = 'ua_light_alert_selection_v1';
             var alertedEvents = {};
@@ -800,11 +812,20 @@ final class UA_Light_Alert {
 
                 saveSelection();
 
-                if ('Notification' in window && Notification.permission === 'default') {
-                    Notification.requestPermission().catch(function() {});
+                if ('Notification' in window) {
+                    var permissionRequest = Notification.permission === 'default'
+                        ? Notification.requestPermission()
+                        : Promise.resolve(Notification.permission);
+                    permissionRequest.then(function(permission) {
+                        if (permission === 'granted') {
+                            registerPwaServiceWorker().then(function(registration) {
+                                if (registration) {
+                                    subscribeForPush(registration);
+                                }
+                            });
+                        }
+                    }).catch(function() {});
                 }
-
-                registerPwaServiceWorker();
 
                 if (soundEl) {
                     var testSound = soundUrls.off || soundUrls.on;
@@ -1020,6 +1041,55 @@ final class UA_Light_Alert {
                     .catch(function() { return null; });
             }
 
+            function urlBase64ToUint8Array(base64String) {
+                var padding = '='.repeat((4 - base64String.length % 4) % 4);
+                var base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+                var raw = window.atob(base64);
+                var output = new Uint8Array(raw.length);
+                for (var i = 0; i < raw.length; i++) {
+                    output[i] = raw.charCodeAt(i);
+                }
+                return output;
+            }
+
+            function subscribeForPush(registration) {
+                if (!registration.pushManager || !vapidPublicKey || !window.fetch) {
+                    return Promise.resolve(null);
+                }
+                return registration.pushManager.getSubscription().then(function(subscription) {
+                    if (subscription) {
+                        return subscription;
+                    }
+                    return registration.pushManager.subscribe({
+                        userVisibleOnly: true,
+                        applicationServerKey: urlBase64ToUint8Array(vapidPublicKey)
+                    });
+                }).then(function(subscription) {
+                    return fetch(pushSubscribeUrl, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            subscription: subscription.toJSON(),
+                            region: regionSelect.value,
+                            group: groupSelect.value,
+                            page_url: window.location.href
+                        })
+                    }).then(function(response) {
+                        if (!response.ok) {
+                            throw new Error('Не вдалося зберегти push-підписку.');
+                        }
+                        noticeBox.style.display = 'block';
+                        noticeBox.textContent = 'Сповіщення для вибраної області та групи увімкнено.';
+                        return subscription;
+                    });
+                }).catch(function(error) {
+                    if (window.console && console.warn) {
+                        console.warn('UA Light Alert push subscription:', error);
+                    }
+                    return null;
+                });
+            }
+
             function sendActivePageAlert(message, event) {
                 noticeBox.style.display = 'block';
                 noticeBox.textContent = '🔔 Увага! ' + message + '!';
@@ -1046,7 +1116,7 @@ final class UA_Light_Alert {
                                 body: body,
                                 icon: '<?php echo esc_js(get_site_icon_url(192)); ?>',
                                 tag: event.key,
-                                renotify: true,
+                                renotify: false,
                                 data: {url: window.location.href}
                             }).catch(function() {});
                         } else {
@@ -1285,6 +1355,20 @@ final class UA_Light_Alert_GitHub_Updater {
         return $release;
     }
 
+    private function get_release_package($release, $version) {
+        $asset_name = self::SLUG . '-' . $version . '.zip';
+        if (!empty($release['assets']) && is_array($release['assets'])) {
+            foreach ($release['assets'] as $asset) {
+                if (!empty($asset['name']) && $asset['name'] === $asset_name && !empty($asset['browser_download_url'])) {
+                    return esc_url_raw($asset['browser_download_url']);
+                }
+            }
+        }
+        return !empty($release['zipball_url'])
+            ? esc_url_raw($release['zipball_url'])
+            : 'https://github.com/' . self::REPOSITORY . '/archive/refs/tags/' . rawurlencode($release['tag_name']) . '.zip';
+    }
+
     private function get_update_object() {
         $release = $this->get_release();
         if (!$release) {
@@ -1300,9 +1384,7 @@ final class UA_Light_Alert_GitHub_Updater {
             return false;
         }
 
-        $package = !empty($release['zipball_url'])
-            ? $release['zipball_url']
-            : 'https://github.com/' . self::REPOSITORY . '/archive/refs/tags/' . rawurlencode($release['tag_name']) . '.zip';
+        $package = $this->get_release_package($release, $version);
 
         return (object) [
             'id' => 'https://github.com/' . self::REPOSITORY,
@@ -1400,9 +1482,7 @@ final class UA_Light_Alert_GitHub_Updater {
         }
 
         $version = ltrim((string) $release['tag_name'], "vV");
-        $download = !empty($release['zipball_url'])
-            ? $release['zipball_url']
-            : 'https://github.com/' . self::REPOSITORY . '/archive/refs/tags/' . rawurlencode($release['tag_name']) . '.zip';
+        $download = $this->get_release_package($release, $version);
 
         return (object) [
             'name' => 'UA Light Alert',
@@ -1424,4 +1504,6 @@ final class UA_Light_Alert_GitHub_Updater {
 
 new UA_Light_Alert();
 new UA_Light_Alert_GitHub_Updater();
+new UA_Light_Alert_Push();
+register_deactivation_hook(__FILE__, ['UA_Light_Alert_Push', 'deactivate']);
 

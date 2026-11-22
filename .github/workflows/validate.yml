@@ -19,7 +19,9 @@ jobs:
         with:
           php-version: '8.1'
       - name: PHP syntax check
-        run: php -l ua-light-alert.php
+        run: find . -type f -name '*.php' -not -path './dist/*' -print0 | xargs -0 -n1 php -l
+      - name: Web Push cryptography regression test
+        run: php tests/push-crypto-test.php
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -32,11 +34,11 @@ jobs:
           mkdir -p dist/ua-light-alert
           rsync -a --exclude='.git' --exclude='.github' --exclude='dist' ./ dist/ua-light-alert/
           cd dist
-          zip -qr ua-light-alert-4.2.2.zip ua-light-alert
+          zip -qr ua-light-alert-4.3.0.zip ua-light-alert
       - name: Upload installable ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: ua-light-alert-4.2.2-installable
-          path: dist/ua-light-alert-4.2.2.zip
+          name: ua-light-alert-4.3.0-installable
+          path: dist/ua-light-alert-4.3.0.zip
           if-no-files-found: error
           retention-days: 30

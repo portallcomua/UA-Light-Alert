@@ -1,0 +1,48 @@
+name: Publish plugin release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Detect plugin version change
+        id: version
+        shell: bash
+        run: |
+          VERSION="$(sed -n 's/.*Version: *\([0-9][0-9.]*\).*/\1/p' ua-light-alert.php | head -n1)"
+          PREVIOUS_VERSION="$(git show HEAD^:ua-light-alert.php 2>/dev/null | sed -n 's/.*Version: *\([0-9][0-9.]*\).*/\1/p' | head -n1 || true)"
+          if [ -z "$VERSION" ]; then
+            echo "Could not read plugin version" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [ "$VERSION" != "$PREVIOUS_VERSION" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build installable plugin ZIP
+        if: steps.version.outputs.publish == 'true'
+        run: |
+          mkdir -p dist/ua-light-alert
+          rsync -a --exclude='.git' --exclude='.github' --exclude='dist' --exclude='tests' ./ dist/ua-light-alert/
+          cd dist
+          zip -qr "ua-light-alert-${{ steps.version.outputs.version }}.zip" ua-light-alert
+      - name: Publish GitHub Release
+        if: steps.version.outputs.publish == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: UA Light Alert ${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          files: dist/ua-light-alert-${{ steps.version.outputs.version }}.zip

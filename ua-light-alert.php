@@ -2,7 +2,7 @@
 /**
  * Plugin Name: UA Light Alert
  * Description: Графіки відключень, CRM рекламодавців та сповіщення про зміни електропостачання.
- * Version: 4.5.5
+ * Version: 4.5.6
  * Plugin URI: https://uaserver.pp.ua/svitlo/
  * Update URI: https://github.com/portallcomua/UA-Light-Alert
  * Author: UAServer
@@ -85,6 +85,11 @@ final class UA_Light_Alert {
                 'id' => home_url('/'),
                 'display' => 'standalone',
                 'prefer_related_applications' => false,
+                'related_applications' => [[
+                    'platform' => 'webapp',
+                    'url' => add_query_arg(['ua_light_manifest' => '1', 'ua_light_start' => $start_url], home_url('/')),
+                    'id' => home_url('/')
+                ]],
                 'background_color' => '#ffffff',
                 'theme_color' => '#ff6b00',
                 'icons' => $icons
@@ -967,6 +972,18 @@ final class UA_Light_Alert {
                     || window.navigator.standalone === true;
             }
 
+            // Chromium can detect an already-installed copy of this PWA even when the user opens the website in a normal browser tab.
+            function hideButtonIfRelatedPwaIsInstalled() {
+                if (!navigator.getInstalledRelatedApps || isPwaInstalled()) return;
+                navigator.getInstalledRelatedApps().then(function(apps) {
+                    if (!Array.isArray(apps)) return;
+                    var installed = apps.some(function(app) {
+                        return app && app.platform === 'webapp' && (!app.id || app.id === <?php echo wp_json_encode(home_url('/')); ?>);
+                    });
+                    if (installed) hideInstallButton();
+                }).catch(function() {});
+            }
+
             function hideInstallButton() {
                 if (installButton) installButton.style.display = 'none';
                 if (installHelp) installHelp.hidden = true;
@@ -981,6 +998,7 @@ final class UA_Light_Alert {
             if (isPwaInstalled()) {
                 hideInstallButton();
             } else {
+                hideButtonIfRelatedPwaIsInstalled();
                 var initialUa = window.navigator.userAgent || '';
                 var isIosInstall = /iphone|ipad|ipod/i.test(initialUa);
                 // Keep the install button visible on all supported devices. Chromium's native prompt is used when available; iOS shows its own instructions.

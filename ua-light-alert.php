@@ -2,7 +2,8 @@
 /**
  * Plugin Name: UA Light Alert
  * Description: Графіки відключень, CRM рекламодавців та сповіщення про зміни електропостачання.
- * Version: 4.2.0
+ * Version: 4.2.1
+ * Update URI: https://github.com/portallcomua/UA-Light-Alert
  * Author: UA Tools
  * Text Domain: ua-light-alert
  */
@@ -1209,4 +1210,159 @@ function ua_light_get_ads() {
     wp_die();
 }
 
-new UA_Light_Alert();
+
+/**
+ * GitHub Releases updater.
+ *
+ * A public GitHub release is the source of truth. The installed plugin checks
+ * the latest release and lets WordPress install its tag archive from Plugins.
+ */
+final class UA_Light_Alert_GitHub_Updater {
+    const REPOSITORY = 'portallcomua/UA-Light-Alert';
+    const SLUG = 'ua-light-alert';
+    const CACHE_KEY = 'ua_light_alert_github_release';
+    const CACHE_TTL = 21600;
+
+    private $plugin_file;
+
+    public function __construct() {
+        $this->plugin_file = plugin_basename(__FILE__);
+
+        // Required for plugins that declare a custom Update URI (WordPress 5.8+).
+        add_filter('update_plugins_github.com', [$this, 'filter_github_update'], 10, 4);
+
+        // Compatibility path for older WordPress versions.
+        add_filter('pre_set_site_transient_update_plugins', [$this, 'filter_update_transient']);
+
+        add_filter('plugins_api', [$this, 'plugin_information'], 20, 3);
+    }
+
+    private function get_release($force = false) {
+        if (!$force) {
+            $cached = get_transient(self::CACHE_KEY);
+            if (is_array($cached) && !empty($cached['tag_name'])) {
+                return $cached;
+            }
+        }
+
+        $response = wp_remote_get(
+            'https://api.github.com/repos/' . self::REPOSITORY . '/releases/latest',
+            [
+                'timeout' => 12,
+                'headers' => [
+                    'Accept' => 'application/vnd.github+json',
+                    'User-Agent' => 'UA-Light-Alert-WordPress-Updater',
+                    'X-GitHub-Api-Version' => '2022-11-28',
+                ],
+            ]
+        );
+
+        if (is_wp_error($response) || 200 !== (int) wp_remote_retrieve_response_code($response)) {
+            return false;
+        }
+
+        $release = json_decode(wp_remote_retrieve_body($response), true);
+        if (!is_array($release) || empty($release['tag_name']) || !empty($release['draft']) || !empty($release['prerelease'])) {
+            return false;
+        }
+
+        set_transient(self::CACHE_KEY, $release, self::CACHE_TTL);
+        return $release;
+    }
+
+    private function get_update_object() {
+        $release = $this->get_release();
+        if (!$release) {
+            return false;
+        }
+
+        $version = ltrim((string) $release['tag_name'], "vV");
+        $plugin_data = get_file_data(__FILE__, ['Version' => 'Version']);
+        $installed_version = isset($plugin_data['Version']) ? $plugin_data['Version'] : '0';
+
+        if (!preg_match('/^\d+(?:\.\d+){1,3}(?:[-+][A-Za-z0-9.-]+)?$/', $version)
+            || !version_compare($version, $installed_version, '>')) {
+            return false;
+        }
+
+        $package = !empty($release['zipball_url'])
+            ? $release['zipball_url']
+            : 'https://github.com/' . self::REPOSITORY . '/archive/refs/tags/' . rawurlencode($release['tag_name']) . '.zip';
+
+        return (object) [
+            'id' => 'https://github.com/' . self::REPOSITORY,
+            'slug' => self::SLUG,
+            'plugin' => $this->plugin_file,
+            'new_version' => $version,
+            'url' => 'https://github.com/' . self::REPOSITORY,
+            'package' => $package,
+            'tested' => '',
+            'requires' => '5.8',
+            'requires_php' => '7.4',
+            'icons' => [],
+            'banners' => [],
+            'banners_rtl' => [],
+            'upgrade_notice' => !empty($release['body']) ? wp_strip_all_tags($release['body']) : '',
+        ];
+    }
+
+    public function filter_github_update($update, $plugin_data = null, $plugin_file = null, $locales = null) {
+        if ($plugin_file && $plugin_file !== $this->plugin_file) {
+            return $update;
+        }
+        $candidate = $this->get_update_object();
+        return $candidate ? $candidate : $update;
+    }
+
+    public function filter_update_transient($transient) {
+        if (!is_object($transient) || empty($transient->checked) || !isset($transient->checked[$this->plugin_file])) {
+            return $transient;
+        }
+
+        $candidate = $this->get_update_object();
+        if (!$candidate) {
+            return $transient;
+        }
+
+        if (!isset($transient->response) || !is_array($transient->response)) {
+            $transient->response = [];
+        }
+        $transient->response[$this->plugin_file] = $candidate;
+        return $transient;
+    }
+
+    public function plugin_information($result, $action, $args) {
+        if ('plugin_information' !== $action || empty($args->slug) || self::SLUG !== $args->slug) {
+            return $result;
+        }
+
+        $release = $this->get_release();
+        if (!$release) {
+            return $result;
+        }
+
+        $version = ltrim((string) $release['tag_name'], "vV");
+        $download = !empty($release['zipball_url'])
+            ? $release['zipball_url']
+            : 'https://github.com/' . self::REPOSITORY . '/archive/refs/tags/' . rawurlencode($release['tag_name']) . '.zip';
+
+        return (object) [
+            'name' => 'UA Light Alert',
+            'slug' => self::SLUG,
+            'version' => $version,
+            'author' => '<a href="https://github.com/portallcomua">UA Tools</a>',
+            'homepage' => 'https://github.com/' . self::REPOSITORY,
+            'download_link' => $download,
+            'trunk' => $download,
+            'requires' => '5.8',
+            'requires_php' => '7.4',
+            'sections' => [
+                'description' => 'Графіки відключень, рекламодавці та звукові сповіщення про зміни електропостачання.',
+                'changelog' => !empty($release['body']) ? nl2br(esc_html($release['body'])) : 'Інформація про зміни доступна в GitHub Releases.',
+            ],
+        ];
+    }
+}
+
+new UA_Light_Alert_GitHub_Updater();
+

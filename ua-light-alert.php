@@ -224,6 +224,7 @@ final class UA_Light_Alert {
 
     public function render_admin_page() {
         wp_enqueue_media();
+        $push_count = UA_Light_Alert_Push::get_subscription_count();
         $ads = get_option($this->option_key, []);
         if (!is_array($ads)) {
             $ads = [];
@@ -236,6 +237,11 @@ final class UA_Light_Alert {
         ?>
         <div class="wrap">
             <h1>Графік світла — Налаштування та рекламодавці</h1>
+            <div class="notice notice-info">
+                <p><strong>Фонові сповіщення:</strong> активних push-підписок — <?php echo absint($push_count); ?>.
+                Після дозволу браузера сповіщення надходитимуть і коли сторінка закрита, якщо сайт працює через HTTPS та серверний WP-Cron виконується щохвилини.
+                Коли сторінка закрита, звук визначається налаштуваннями сповіщень пристрою; довільний MP3 браузер не може примусово програвати у фоні.</p>
+            </div>
 
             <?php if (isset($_GET['msg'])) : ?>
                 <div class="notice notice-success is-dismissible">
@@ -1487,4 +1493,5 @@ final class UA_Light_Alert_GitHub_Updater {
 new UA_Light_Alert();
 new UA_Light_Alert_GitHub_Updater();
 new UA_Light_Alert_Push();
+register_deactivation_hook(__FILE__, ['UA_Light_Alert_Push', 'deactivate']);
 

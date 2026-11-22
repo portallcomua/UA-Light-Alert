@@ -40,6 +40,18 @@ final class UA_Light_Alert_Push {
         return $keys && !empty($keys['public']) ? $keys['public'] : '';
     }
 
+    public static function get_subscription_count() {
+        $subscriptions = get_option(self::SUBS_OPTION, []);
+        return is_array($subscriptions) ? count($subscriptions) : 0;
+    }
+
+    public static function deactivate() {
+        $timestamp = wp_next_scheduled(self::CRON_HOOK);
+        if ($timestamp) {
+            wp_unschedule_event($timestamp, self::CRON_HOOK);
+        }
+    }
+
     private static function get_vapid_keys() {
         $keys = get_option(self::KEYS_OPTION, []);
         if (is_array($keys) && !empty($keys['private_pem']) && !empty($keys['public'])) {

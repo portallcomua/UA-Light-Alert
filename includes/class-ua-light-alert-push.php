@@ -232,9 +232,10 @@ final class UA_Light_Alert_Push {
             $message = 'yes' === $event['status']
                 ? 'За графіком очікується відновлення електропостачання'
                 : 'За графіком очікується відключення електроенергії';
+            $minutesUntil = max(1, (int) ceil($seconds / 60));
             $payload = [
                 'title' => 'Графік світла',
-                'body' => 'Через ' . $lead . ' хвилин. ' . $message . ' о ' . $event['time']->format('H:i') . '. Це попередження за графіком, не підтвердження фактичного стану.',
+                'body' => 'Через ' . $minutesUntil . ' хвилин. ' . $message . ' о ' . $event['time']->format('H:i') . '. Це попередження за графіком, не підтвердження фактичного стану.',
                 'url' => !empty($subscription['page_url']) ? $subscription['page_url'] : home_url('/'),
                 'tag' => $eventKey,
                 'vibrate' => [500, 200, 500],

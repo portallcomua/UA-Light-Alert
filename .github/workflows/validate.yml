@@ -37,6 +37,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ua-light-alert-4.3.0-installable
-          path: dist/ua-light-alert-4.2.2.zip
+          path: dist/ua-light-alert-4.3.0.zip
           if-no-files-found: error
           retention-days: 30

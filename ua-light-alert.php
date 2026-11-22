@@ -1294,6 +1294,7 @@ final class UA_Light_Alert_GitHub_Updater {
             'id' => 'https://github.com/' . self::REPOSITORY,
             'slug' => self::SLUG,
             'plugin' => $this->plugin_file,
+            'version' => $version,
             'new_version' => $version,
             'url' => 'https://github.com/' . self::REPOSITORY,
             'package' => $package,

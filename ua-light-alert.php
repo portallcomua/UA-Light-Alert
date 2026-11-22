@@ -2,9 +2,11 @@
 /**
  * Plugin Name: UA Light Alert
  * Description: Графіки відключень, CRM рекламодавців та сповіщення про зміни електропостачання.
- * Version: 4.3.0
+ * Version: 4.3.1
+ * Plugin URI: https://uaserver.pp.ua/svitlo/
  * Update URI: https://github.com/portallcomua/UA-Light-Alert
- * Author: UA Tools
+ * Author: UAServer
+ * Author URI: https://uaserver.pp.ua/
  * Text Domain: ua-light-alert
  */
 
@@ -24,7 +26,8 @@ final class UA_Light_Alert {
         // Friendly Ukrainian alias; the legacy shortcode remains fully supported.
         add_shortcode('grafik_svitla', [$this, 'render_frontend']);
 
-        add_action('admin_menu', [$this, 'add_admin_menu']);
+        add_action('admin_menu', [$this, 'add_admin_menu'], 99);
+        add_filter('plugin_action_links_' . plugin_basename(__FILE__), [$this, 'add_plugin_action_links']);
         add_action('admin_init', [$this, 'handle_admin_actions']);
         add_action('wp_head', [$this, 'print_pwa_manifest']);
         add_action('template_redirect', [$this, 'serve_pwa_resources']);
@@ -131,6 +134,7 @@ final class UA_Light_Alert {
      * ------------------------------------------------------ */
 
     public function add_admin_menu() {
+        // Main menu entry.
         add_menu_page(
             'Графік світла',
             'Графік світла',
@@ -140,6 +144,22 @@ final class UA_Light_Alert {
             'dashicons-lightbulb',
             30
         );
+
+        // Also expose it under Settings so it remains easy to find in the dashboard.
+        add_submenu_page(
+            'options-general.php',
+            'Налаштування графіка світла',
+            'Графік світла',
+            'manage_options',
+            'ua-light-alert',
+            [$this, 'render_admin_page']
+        );
+    }
+
+    public function add_plugin_action_links($links) {
+        $settings_link = '<a href="' . esc_url(admin_url('admin.php?page=ua-light-alert')) . '">Налаштування</a>';
+        array_unshift($links, $settings_link);
+        return $links;
     }
 
     public function handle_admin_actions() {
@@ -1488,8 +1508,8 @@ final class UA_Light_Alert_GitHub_Updater {
             'name' => 'UA Light Alert',
             'slug' => self::SLUG,
             'version' => $version,
-            'author' => '<a href="https://github.com/portallcomua">UA Tools</a>',
-            'homepage' => 'https://github.com/' . self::REPOSITORY,
+            'author' => '<a href="https://uaserver.pp.ua/">UAServer</a>',
+            'homepage' => 'https://uaserver.pp.ua/svitlo/',
             'download_link' => $download,
             'trunk' => $download,
             'requires' => '5.8',

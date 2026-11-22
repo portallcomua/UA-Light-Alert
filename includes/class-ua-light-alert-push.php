@@ -213,10 +213,12 @@ final class UA_Light_Alert_Push {
                 continue;
             }
 
-            $message = 'yes' === $event['status'] ? 'Світло з’явиться' : 'Світло зникне';
+            $message = 'yes' === $event['status']
+                ? 'За графіком очікується відновлення електропостачання'
+                : 'За графіком очікується відключення електроенергії';
             $payload = [
                 'title' => 'Графік світла',
-                'body' => $message . ' о ' . $event['time']->format('H:i') . '.',
+                'body' => 'Через ' . $lead . ' хвилин. ' . $message . ' о ' . $event['time']->format('H:i') . '. Це попередження за графіком, не підтвердження фактичного стану.',
                 'url' => !empty($subscription['page_url']) ? $subscription['page_url'] : home_url('/'),
                 'tag' => $eventKey,
                 'vibrate' => [500, 200, 500],
@@ -262,22 +264,46 @@ final class UA_Light_Alert_Push {
             ? $data['fact']['data'][$latest] : false;
     }
 
+    private function normalize_half_hour_status($status, $half) {
+        if ('yes' === $status || 'no' === $status) {
+            return $status;
+        }
+        // "first": outage in the first 30 minutes; "second": outage in the second 30.
+        if ('first' === $status) {
+            return 0 === $half ? 'no' : 'yes';
+        }
+        if ('second' === $status) {
+            return 0 === $half ? 'yes' : 'no';
+        }
+        return '';
+    }
+
     private function find_next_event($groupData, DateTimeImmutable $now) {
-        $currentHour = (int) $now->format('G');
-        $currentKey = (string) ($currentHour + 1);
-        $currentStatus = isset($groupData[$currentKey]) ? $groupData[$currentKey] : '';
-        if (!$currentStatus || in_array($currentStatus, ['first', 'second'], true)) {
+        $hour = (int) $now->format('G');
+        $minute = (int) $now->format('i');
+        $currentSlot = ($hour * 2) + ($minute >= 30 ? 1 : 0);
+        $currentKey = (string) (intdiv($currentSlot, 2) + 1);
+        $currentStatus = $this->normalize_half_hour_status(
+            isset($groupData[$currentKey]) ? $groupData[$currentKey] : '',
+            $currentSlot % 2
+        );
+        if (!$currentStatus) {
             return false;
         }
-        for ($offset = 1; $offset <= 24; $offset++) {
-            $target = $now->setTime(0, 0)->modify('+' . ($currentHour + $offset) . ' hours');
-            $hour = (int) $target->format('G');
-            $key = (string) ($hour + 1);
-            $status = isset($groupData[$key]) ? $groupData[$key] : '';
-            if (!$status || in_array($status, ['first', 'second'], true)) {
+
+        for ($offset = 1; $offset <= 48; $offset++) {
+            $slot = ($currentSlot + $offset) % 48;
+            $key = (string) (intdiv($slot, 2) + 1);
+            $status = $this->normalize_half_hour_status(
+                isset($groupData[$key]) ? $groupData[$key] : '',
+                $slot % 2
+            );
+            if (!$status) {
                 continue;
             }
             if ($status !== $currentStatus) {
+                $minutesFromMidnight = ($currentSlot * 30) + ($offset * 30);
+                $target = $now->setTime(0, 0)->modify('+' . $minutesFromMidnight . ' minutes');
                 return ['time' => $target, 'status' => $status];
             }
         }

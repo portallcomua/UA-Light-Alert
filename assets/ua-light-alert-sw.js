@@ -23,7 +23,7 @@ self.addEventListener('push', function(event) {
         icon: payload.icon || '',
         badge: payload.badge || '',
         tag: payload.tag || 'ua-light-alert',
-        renotify: true,
+        renotify: false,
         requireInteraction: true,
         vibrate: Array.isArray(payload.vibrate) ? payload.vibrate : [500, 200, 500],
         data: {url: payload.url || self.registration.scope}

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: UA Light Alert
  * Description: Графіки відключень, CRM рекламодавців та сповіщення про зміни електропостачання.
- * Version: 4.5.7
+ * Version: 4.5.8
  * Plugin URI: https://uaserver.pp.ua/svitlo/
  * Update URI: https://github.com/portallcomua/UA-Light-Alert
  * Author: UAServer
@@ -41,15 +41,8 @@ final class UA_Light_Alert {
 
 
     public function print_pwa_manifest() {
-        $page_id = get_queried_object_id();
-        $start_page = $page_id ? get_permalink($page_id) : '';
-        if (!$start_page) {
-            $start_page = home_url('/');
-        }
-        $manifest_url = add_query_arg(
-            ['ua_light_manifest' => '1', 'ua_light_start' => $start_page],
-            home_url('/')
-        );
+        // Keep one stable manifest URL across page loads.
+        $manifest_url = add_query_arg(['ua_light_manifest' => '1'], home_url('/'));
         echo '<link rel="manifest" href="' . esc_url($manifest_url) . '">' . "\n";
         echo '<meta name="mobile-web-app-capable" content="yes">' . "\n";
         echo '<meta name="apple-mobile-web-app-capable" content="yes">' . "\n";
@@ -57,17 +50,43 @@ final class UA_Light_Alert {
     }
 
     public function serve_pwa_resources() {
+        if (isset($_GET['ua_light_icon'])) {
+            $size = absint(wp_unslash($_GET['ua_light_icon']));
+            $icon_data = [
+                192 => 'iVBORw0KGgoAAAANSUhEUgAAAMAAAADACAYAAABS3GwHAAACo0lEQVR42u3cwXHjMBREQYDpQuEwXygGsagDZrpDUP03hlzenXuNPaDU5SNAACAAEAAIAAQAAgABgABAACAAEAAIAAQAAgABgABAACAA/ub2r1gF4PgRAAjA+iMAx48AQADWHwGAAGLX/zN9LgLw9EEAIADrjwAcPwIAAVh/BAACsP4IwPEjABCA9UcAjh8BgADOXH9/CSoAEIC3PwJw/AgABGD9EYDjRwAgAOuPAEAA1h8BOH4EAAKw/gjg1OP3l6ACAAF4+iAAEID1RwCOHwGAAKw/AnD8CAAEYP0RgONHACAA648ATuUvQQVg/RGA40cAIADrjwAcPwKAh+Zew7RZ/98E/UrWTwBqj18A1t93AB+B429dfwFQffwCsP7Vxy8Ax+87gI+A1vUXgPWvPn4B4AnkI7D+resvAMdfffwCoPr4BWD9fQdw/I6/df0FQPXxC8D6Vx+/APAdwPpbfwE4fscvABCA9bf+AnD8jl8AOH4BWH8EgPUXgPV3/AJw/AgA6y8A6+/4I/jfoZMjdPyeQH4CIQBPHwTg+BEACCD6/W/9BeDpgwAcPwIAAeS//62/ADx9EAAIwPojgPz3v+MXgOVHACAA648A8t//jl8Alh8BgACsPwLIf/87fgGAADx9EIDjRwD573/HLwAQgKcPAnD8CKDn/Y8ArD8CcPwIwPEjAO9/BGD9EYDjRwAggLPf/9ZfAJ4+CMDxIwAQQP773/oLwNMHAYAArD8CyH//O34BWH4EAAKw/ggg//3v+AVg+REACMD6I4D897/jFwAIwNMHATh+BJD//nf8AgABePogAMePAHre/wjA+iMAx48AHD8C8P5HANYfATh+BAACAAGAAEAAIAAQAAgABAACAAGAAEAAIAAQAAgABAACgNd9Abhzm5PqhCxCAAAAAElFTkSuQmCC',
+                512 => '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'
+            ];
+            if (!isset($icon_data[$size])) {
+                status_header(404);
+                exit;
+            }
+            $png = base64_decode($icon_data[$size], true);
+            if ($png === false) {
+                status_header(500);
+                exit;
+            }
+            nocache_headers();
+            header('Content-Type: image/png');
+            header('X-Content-Type-Options: nosniff');
+            echo $png;
+            exit;
+        }
+
         if (isset($_GET['ua_light_manifest'])) {
             $icon_192 = get_site_icon_url(192);
             $icon_512 = get_site_icon_url(512);
-            $start_url = home_url('/');
-            $requested_start = isset($_GET['ua_light_start']) ? esc_url_raw(wp_unslash($_GET['ua_light_start'])) : '';
-            $referrer = !empty($_SERVER['HTTP_REFERER']) ? esc_url_raw(wp_unslash($_SERVER['HTTP_REFERER'])) : '';
-            $candidate = $requested_start ? $requested_start : $referrer;
-            if ($candidate
-                && wp_parse_url($candidate, PHP_URL_HOST) === wp_parse_url(home_url('/'), PHP_URL_HOST)
-                && 0 === strpos((string) wp_parse_url($candidate, PHP_URL_PATH), (string) wp_parse_url(home_url('/'), PHP_URL_PATH))) {
-                $start_url = $candidate;
+
+            // Use one canonical launch URL and one stable app identity.
+            $schedule_page = get_page_by_path('svitlo');
+            $start_url = $schedule_page ? get_permalink($schedule_page) : home_url('/');
+            $app_id = home_url('/?ua-light-alert-app=1');
+
+            // Keep the site's existing icon; provide bundled PNG fallbacks if none is configured.
+            if (!$icon_192) {
+                $icon_192 = add_query_arg(['ua_light_icon' => '192'], home_url('/'));
+            }
+            if (!$icon_512) {
+                $icon_512 = add_query_arg(['ua_light_icon' => '512'], home_url('/'));
             }
             $icons = [];
             if ($icon_192) {
@@ -82,16 +101,14 @@ final class UA_Light_Alert {
                 'description' => 'Графіки та сповіщення про відключення електроенергії',
                 'start_url' => $start_url,
                 'scope' => home_url('/'),
-                // Keep the app identity equal to the original start URL. This also
-                // preserves detection of installations created before the explicit
-                // manifest "id" field was introduced.
-                'id' => $start_url,
+                // Stable app identity, independent of the current document URL.
+                'id' => $app_id,
                 'display' => 'standalone',
                 'prefer_related_applications' => false,
                 'related_applications' => [[
                     'platform' => 'webapp',
-                    'url' => add_query_arg(['ua_light_manifest' => '1', 'ua_light_start' => $start_url], home_url('/')),
-                    'id' => $start_url
+                    'url' => add_query_arg(['ua_light_manifest' => '1'], home_url('/')),
+                    'id' => $app_id
                 ]],
                 'background_color' => '#ffffff',
                 'theme_color' => '#ff6b00',

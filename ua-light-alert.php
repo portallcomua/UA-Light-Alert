@@ -2,7 +2,7 @@
 /**
  * Plugin Name: UA Light Alert
  * Description: Графіки відключень, CRM рекламодавців та сповіщення про зміни електропостачання.
- * Version: 4.5.0
+ * Version: 4.5.1
  * Plugin URI: https://uaserver.pp.ua/svitlo/
  * Update URI: https://github.com/portallcomua/UA-Light-Alert
  * Author: UAServer
@@ -115,6 +115,8 @@ final class UA_Light_Alert {
             'sound_on_url'   => '',
             'voice_enabled'  => 1,
             'voice_gender'   => 'female',
+            'voice_name'     => '',
+            'voice_lang'     => '',
             'voice_text_off' => 'Увага! За графіком очікується відключення електроенергії.',
             'voice_text_on'  => 'Увага! За графіком очікується відновлення електропостачання.',
             'voice_volume'   => 80,
@@ -187,6 +189,8 @@ final class UA_Light_Alert {
             $voice_volume = min(100, $voice_volume);
             $voice_gender = sanitize_key(wp_unslash($_POST['voice_gender'] ?? 'female'));
             if (!in_array($voice_gender, ['female', 'male'], true)) $voice_gender = 'female';
+            $voice_name = sanitize_text_field(wp_unslash($_POST['voice_name'] ?? ''));
+            $voice_lang = sanitize_text_field(wp_unslash($_POST['voice_lang'] ?? ''));
             $voice_text_off = sanitize_textarea_field(wp_unslash($_POST['voice_text_off'] ?? ''));
             $voice_text_on = sanitize_textarea_field(wp_unslash($_POST['voice_text_on'] ?? ''));
             if ($voice_text_off === '') $voice_text_off = $this->default_settings()['voice_text_off'];
@@ -204,6 +208,8 @@ final class UA_Light_Alert {
                 'sound_on_url'   => esc_url_raw(wp_unslash($_POST['sound_on_url'] ?? '')),
                 'voice_enabled'  => isset($_POST['voice_enabled']) ? 1 : 0,
                 'voice_gender'   => $voice_gender,
+                'voice_name'     => $voice_name,
+                'voice_lang'     => $voice_lang,
                 'voice_text_off' => $voice_text_off,
                 'voice_text_on'  => $voice_text_on,
                 'voice_volume'   => $voice_volume,
@@ -373,11 +379,12 @@ final class UA_Light_Alert {
                     <tr>
                         <th scope="row">Голос</th>
                         <td>
-                            <select name="voice_gender" id="ua-light-voice-gender">
-                                <option value="female" <?php selected($settings['voice_gender'], 'female'); ?>>Жіночий</option>
-                                <option value="male" <?php selected($settings['voice_gender'], 'male'); ?>>Чоловічий</option>
+                            <select name="voice_name" id="ua-light-voice-name" class="regular-text">
+                                <option value="">Автоматично — перший доступний український голос</option>
                             </select>
-                            <p class="description">Це бажаний тип голосу. Браузер використовує відповідний доступний голос українською, якщо він встановлений на пристрої.</p>
+                            <input type="hidden" name="voice_lang" id="ua-light-voice-lang" value="<?php echo esc_attr($settings['voice_lang']); ?>">
+                            <input type="hidden" name="voice_gender" value="<?php echo esc_attr($settings['voice_gender']); ?>">
+                            <p class="description" id="ua-light-voice-status">Список формується з голосів, які реально доступні у цьому браузері. Якщо українського голосу немає, браузер може використати голос за замовчуванням іншою мовою.</p>
                         </td>
                     </tr>
                     <tr>
@@ -432,28 +439,69 @@ final class UA_Light_Alert {
                             });
                             frame.open();
                         });
-                        $('.ua-light-preview-voice').on('click', function(e) {
-                            e.preventDefault();
+                        var voiceSelect = document.getElementById('ua-light-voice-name');
+                        var voiceLang = document.getElementById('ua-light-voice-lang');
+                        var savedVoiceName = <?php echo wp_json_encode($settings['voice_name']); ?>;
+                        var savedVoiceLang = <?php echo wp_json_encode($settings['voice_lang']); ?>;
+                        var voiceStatus = document.getElementById('ua-light-voice-status');
+                        function refreshVoiceList() {
+                            if (!voiceSelect || !('speechSynthesis' in window)) return;
+                            var voices = window.speechSynthesis.getVoices() || [];
+                            var previous = voiceSelect.value || savedVoiceName;
+                            voiceSelect.innerHTML = '';
+                            var auto = document.createElement('option');
+                            auto.value = '';
+                            auto.textContent = 'Автоматично — перший доступний український голос';
+                            voiceSelect.appendChild(auto);
+                            voices.forEach(function(voice) {
+                                var option = document.createElement('option');
+                                option.value = voice.name;
+                                option.textContent = voice.name + ' (' + voice.lang + ')' + (voice.default ? ' — за замовчуванням' : '');
+                                option.dataset.lang = voice.lang || '';
+                                voiceSelect.appendChild(option);
+                            });
+                            var match = Array.prototype.find.call(voiceSelect.options, function(option) {
+                                return option.value === previous && (!savedVoiceLang || !option.dataset.lang || option.dataset.lang === savedVoiceLang);
+                            });
+                            if (match) voiceSelect.value = match.value;
+                            var selected = voiceSelect.options[voiceSelect.selectedIndex];
+                            if (voiceLang && selected) voiceLang.value = selected.dataset.lang || '';
+                            var uk = voices.filter(function(v) { return /^uk([-_]|$)/i.test(v.lang || ''); });
+                            if (voiceStatus) voiceStatus.textContent = uk.length
+                                ? 'Знайдено українських голосів: ' + uk.length + '. Оберіть конкретний голос і збережіть налаштування.'
+                                : 'Українських голосів у цьому браузері не знайдено. Якість та мова автоматичного голосу не гарантуються.';
+                        }
+                        if ('speechSynthesis' in window) {
+                            refreshVoiceList();
+                            window.speechSynthesis.onvoiceschanged = refreshVoiceList;
+                            setTimeout(refreshVoiceList, 500);
+                        }
+                        if (voiceSelect) voiceSelect.addEventListener('change', function() {
+                            var option = voiceSelect.options[voiceSelect.selectedIndex];
+                            if (voiceLang) voiceLang.value = option ? (option.dataset.lang || '') : '';
+                        });
+                        function speakPreview(text) {
                             if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) {
                                 window.alert('Цей браузер не підтримує голосове відтворення.');
                                 return;
                             }
+                            var voices = window.speechSynthesis.getVoices() || [];
+                            var chosenName = voiceSelect ? voiceSelect.value : '';
+                            var chosen = voices.find(function(v) { return v.name === chosenName; });
+                            if (!chosen) chosen = voices.find(function(v) { return /^uk([-_]|$)/i.test(v.lang || ''); }) || null;
+                            window.speechSynthesis.cancel();
+                            var utterance = new SpeechSynthesisUtterance(text);
+                            utterance.lang = chosen ? chosen.lang : 'uk-UA';
+                            utterance.volume = <?php echo max(0, min(100, (int) $settings['voice_volume'])) / 100; ?>;
+                            if (chosen) utterance.voice = chosen;
+                            // Delay after cancel avoids a Chrome speech queue race on repeated previews.
+                            setTimeout(function() { window.speechSynthesis.speak(utterance); }, 120);
+                        }
+                        $('.ua-light-preview-voice').on('click', function(e) {
+                            e.preventDefault();
                             var text = $('#' + $(this).data('target')).val();
                             if (!text) { window.alert('Введіть текст повідомлення.'); return; }
-                            var utterance = new SpeechSynthesisUtterance(text);
-                            utterance.lang = 'uk-UA';
-                            utterance.volume = <?php echo max(0, min(100, (int) $settings['voice_volume'])) / 100; ?>;
-                            var preferred = $('#ua-light-voice-gender').val();
-                            var voices = window.speechSynthesis.getVoices();
-                            var ukrainian = voices.filter(function(v) { return /^uk([-_]|$)/i.test(v.lang || ''); });
-                            var femaleNames = /olena|oksana|iryna|irina|kateryna|natalia|nataliya|anna|svitlana|yulia|lesya|female|woman/i;
-                            var maleNames = /ostap|dmytro|andrii|andriy|ivan|oleksandr|mykola|taras|male|man/i;
-                            var matcher = preferred === 'female' ? femaleNames : maleNames;
-                            var match = ukrainian.find(function(v) { return matcher.test(v.name || ''); });
-                            if (!match) match = ukrainian[0] || voices.find(function(v) { return v.default; }) || null;
-                            if (match) utterance.voice = match;
-                            window.speechSynthesis.cancel();
-                            window.speechSynthesis.speak(utterance);
+                            speakPreview(text);
                         });
                         $('.ua-light-preview-audio').on('click', function(e) {
                             e.preventDefault();
@@ -857,6 +905,8 @@ final class UA_Light_Alert {
             var noticeMinutes = <?php echo (int) $notice_minutes; ?>;
             var voiceEnabled = <?php echo !empty($settings['voice_enabled']) ? 'true' : 'false'; ?>;
             var voiceGender = <?php echo wp_json_encode($settings['voice_gender']); ?>;
+            var voiceName = <?php echo wp_json_encode($settings['voice_name']); ?>;
+            var voiceLang = <?php echo wp_json_encode($settings['voice_lang']); ?>;
             var voiceTextOff = <?php echo wp_json_encode($settings['voice_text_off']); ?>;
             var voiceTextOn = <?php echo wp_json_encode($settings['voice_text_on']); ?>;
             var voiceVolume = <?php echo max(0, min(100, (int) $settings['voice_volume'])) / 100; ?>;
@@ -1293,11 +1343,14 @@ final class UA_Light_Alert {
             function selectPreferredSpeechVoice() {
                 if (!('speechSynthesis' in window)) return null;
                 var voices = window.speechSynthesis.getVoices() || [];
-                var ukrainian = voices.filter(function(v) { return /^uk([-_]|$)/i.test(v.lang || ''); });
-                var femaleNames = /olena|oksana|iryna|irina|kateryna|natalia|nataliya|anna|svitlana|yulia|lesya|female|woman/i;
-                var maleNames = /ostap|dmytro|andrii|andriy|ivan|oleksandr|mykola|taras|male|man/i;
-                var matcher = voiceGender === 'male' ? maleNames : femaleNames;
-                return ukrainian.find(function(v) { return matcher.test(v.name || ''); }) || ukrainian[0] || voices.find(function(v) { return v.default; }) || null;
+                if (voiceName) {
+                    var exact = voices.find(function(v) {
+                        return v.name === voiceName && (!voiceLang || v.lang === voiceLang);
+                    });
+                    if (exact) return exact;
+                }
+                return voices.find(function(v) { return /^uk([-_]|$)/i.test(v.lang || ''); })
+                    || voices.find(function(v) { return v.default; }) || null;
             }
 
             function sendActivePageAlert(message, event) {
@@ -1334,26 +1387,28 @@ final class UA_Light_Alert {
                             String(event.time.getMinutes()).padStart(2, '0');
                         var customText = event.status === 'yes' ? voiceTextOn : voiceTextOff;
                         var spokenText = (customText || message).replace(/\\{time\\}/g, eventTime);
-                        if (spokenText === customText || spokenText.indexOf(eventTime) === -1) {
+                        if (spokenText.indexOf(eventTime) === -1) {
                             spokenText += '. Час за графіком: ' + eventTime + '.';
                         }
-                        var spoken = new SpeechSynthesisUtterance(spokenText);
-                        spoken.lang = 'uk-UA';
-                        spoken.volume = voiceVolume;
                         var selectedVoice = selectPreferredSpeechVoice();
-                        if (selectedVoice) spoken.voice = selectedVoice;
                         var speakRemaining = alertRepeat + 1;
-                        spoken.onend = function() {
-                            speakRemaining--;
-                            if (speakRemaining > 0 && !isQuietHoursNow()) {
-                                var repeated = new SpeechSynthesisUtterance(spoken.text);
-                                repeated.lang = 'uk-UA';
-                                repeated.volume = voiceVolume;
-                                repeated.onend = spoken.onend;
-                                window.speechSynthesis.speak(repeated);
-                            }
-                        };
-                        window.speechSynthesis.speak(spoken);
+                        function speakNextCopy() {
+                            if (speakRemaining <= 0 || isQuietHoursNow()) return;
+                            var spoken = new SpeechSynthesisUtterance(spokenText);
+                            spoken.lang = selectedVoice ? selectedVoice.lang : 'uk-UA';
+                            spoken.volume = voiceVolume;
+                            if (selectedVoice) spoken.voice = selectedVoice;
+                            spoken.onend = function() {
+                                speakRemaining--;
+                                if (speakRemaining > 0 && !isQuietHoursNow()) {
+                                    setTimeout(speakNextCopy, 350);
+                                }
+                            };
+                            spoken.onerror = function() { speakRemaining = 0; };
+                            window.speechSynthesis.speak(spoken);
+                        }
+                        // Chrome can briefly retain a cancelled utterance; start a fresh queue after a short delay.
+                        setTimeout(speakNextCopy, 150);
                     } catch (e) {}
                 }
                 if (navigator.vibrate) navigator.vibrate([250, 120, 250]);

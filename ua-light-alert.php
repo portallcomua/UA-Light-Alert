@@ -2,7 +2,7 @@
 /**
  * Plugin Name: UA Light Alert
  * Description: Графіки відключень, CRM рекламодавців та сповіщення про зміни електропостачання.
- * Version: 4.3.3
+ * Version: 4.4.0
  * Plugin URI: https://uaserver.pp.ua/svitlo/
  * Update URI: https://github.com/portallcomua/UA-Light-Alert
  * Author: UAServer
@@ -113,6 +113,8 @@ final class UA_Light_Alert {
             'sound_url'      => '',
             'sound_off_url'  => '',
             'sound_on_url'   => '',
+            'voice_enabled'  => 1,
+            'voice_volume'   => 80,
         ];
     }
 
@@ -174,10 +176,14 @@ final class UA_Light_Alert {
             if (!in_array($notice_minutes, [1, 5, 10], true)) {
                 $notice_minutes = 5;
             }
+            $voice_volume = isset($_POST['voice_volume']) ? absint($_POST['voice_volume']) : 80;
+            $voice_volume = min(100, $voice_volume);
             $settings = [
                 'notice_minutes' => $notice_minutes,
                 'sound_off_url'  => esc_url_raw(wp_unslash($_POST['sound_off_url'] ?? '')),
                 'sound_on_url'   => esc_url_raw(wp_unslash($_POST['sound_on_url'] ?? '')),
+                'voice_enabled'  => isset($_POST['voice_enabled']) ? 1 : 0,
+                'voice_volume'   => $voice_volume,
             ];
 
             update_option($this->settings_key, $settings);
@@ -304,7 +310,7 @@ final class UA_Light_Alert {
                                         </option>
                                     <?php endforeach; ?>
                                 </select>
-                                <p class="description">Окреме попередження перед кожною зміною: вимкненням або відновленням електропостачання.</p>
+                                <p class="description">Окреме попередження перед запланованою зміною. Плагін не стверджує, що фактичне вимкнення чи ввімкнення вже відбулося.</p>
                             </td>
                         </tr>
                         <tr>
@@ -357,6 +363,20 @@ final class UA_Light_Alert {
                     });
                     </script>
 
+                    <tr>
+                        <th scope="row">Голосові повідомлення</th>
+                        <td>
+                            <label><input type="checkbox" name="voice_enabled" value="1" <?php checked(!empty($settings['voice_enabled'])); ?>> Озвучувати попередження українською мовою, коли сторінка відкрита</label>
+                            <p class="description">Використовує синтез мовлення браузера. Доступність українського голосу залежить від пристрою та браузера.</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Гучність голосу</th>
+                        <td>
+                            <input type="range" name="voice_volume" min="0" max="100" step="5" value="<?php echo esc_attr((int) $settings['voice_volume']); ?>" oninput="this.nextElementSibling.value=this.value+'%'">
+                            <output><?php echo esc_html((int) $settings['voice_volume']); ?>%</output>
+                        </td>
+                    </tr>
                     <?php submit_button('Зберегти налаштування', 'primary', 'ua_save_settings'); ?>
                 </form>
             </div>
@@ -709,6 +729,8 @@ final class UA_Light_Alert {
             var ticker = null;
             var refreshTicker = null;
             var noticeMinutes = <?php echo (int) $notice_minutes; ?>;
+            var voiceEnabled = <?php echo !empty($settings['voice_enabled']) ? 'true' : 'false'; ?>;
+            var voiceVolume = <?php echo max(0, min(100, (int) $settings['voice_volume'])) / 100; ?>;
             var soundUrls = {
                 off: <?php echo wp_json_encode($sound_off_url); ?>,
                 on: <?php echo wp_json_encode($sound_on_url); ?>
@@ -913,6 +935,15 @@ final class UA_Light_Alert {
                 loadAds(activeRegion, activeGroup);
             }
 
+            function normalizeHalfHourStatus(status, half) {
+                if (status === 'yes' || status === 'no') return status;
+                // Source semantics: "first" = outage in the first half-hour;
+                // "second" = outage in the second half-hour.
+                if (status === 'first') return half === 0 ? 'no' : 'yes';
+                if (status === 'second') return half === 0 ? 'yes' : 'no';
+                return null;
+            }
+
             function renderSchedule(groupData) {
                 resultDiv.innerHTML = '';
 
@@ -940,19 +971,22 @@ final class UA_Light_Alert {
 
                 var tbody = document.createElement('tbody');
 
-                for (var key = 1; key <= 24; key++) {
-                    var status = groupData[String(key)];
-                    var startHour = key - 1;
-                    var endHour = key % 24;
+                for (var slot = 0; slot < 48; slot++) {
+                    var hourKey = String(Math.floor(slot / 2) + 1);
+                    var sourceStatus = groupData[hourKey];
+                    var half = slot % 2;
+                    var status = normalizeHalfHourStatus(sourceStatus, half);
+                    var startMinutes = slot * 30;
+                    var endMinutes = (startMinutes + 30) % 1440;
+                    var fmt = function(value) {
+                        return String(Math.floor(value / 60)).padStart(2, '0') + ':' +
+                            String(value % 60).padStart(2, '0');
+                    };
 
                     var row = document.createElement('tr');
                     var hourCell = document.createElement('td');
                     var statusCell = document.createElement('td');
-
-                    hourCell.textContent =
-                        String(startHour).padStart(2, '0') + ':00 — ' +
-                        String(endHour).padStart(2, '0') + ':00';
-
+                    hourCell.textContent = fmt(startMinutes) + ' — ' + fmt(endMinutes);
                     statusCell.style.fontWeight = 'bold';
 
                     if (status === 'yes') {
@@ -964,7 +998,7 @@ final class UA_Light_Alert {
                         statusCell.style.backgroundColor = '#f8d7da';
                         statusCell.style.color = '#721c24';
                     } else {
-                        statusCell.textContent = 'Перехід / немає даних';
+                        statusCell.textContent = 'Немає даних';
                         statusCell.style.backgroundColor = '#fff3cd';
                         statusCell.style.color = '#856404';
                     }
@@ -990,80 +1024,63 @@ final class UA_Light_Alert {
              */
 
             function checkNextChange() {
-                if (!currentGroupData || !activeGroup) {
-                    return;
-                }
-
+                if (!currentGroupData || !activeGroup) return;
                 var now = new Date();
-                var currentHour = now.getHours();
-                var currentKey = String(currentHour + 1);
-                var currentStatus = currentGroupData[currentKey];
-
-                if (!currentStatus || currentStatus === 'first' || currentStatus === 'second') {
+                var currentSlot = now.getHours() * 2 + (now.getMinutes() >= 30 ? 1 : 0);
+                var currentKey = String(Math.floor(currentSlot / 2) + 1);
+                var currentStatus = normalizeHalfHourStatus(currentGroupData[currentKey], currentSlot % 2);
+                if (!currentStatus) {
                     timerBox.style.display = 'block';
-                    timerText.textContent = 'Очікуємо актуальний графік.';
+                    timerText.textContent = 'Для поточного часу немає достовірних даних.';
                     return;
                 }
 
                 var nextEvent = null;
-
-                for (var offset = 1; offset <= 24; offset++) {
-                    var nextHour = (currentHour + offset) % 24;
-                    var nextKey = String(nextHour + 1);
-                    var nextStatus = currentGroupData[nextKey];
-
-                    if (!nextStatus || nextStatus === 'first' || nextStatus === 'second') {
-                        continue;
-                    }
-
-                    if (nextStatus !== currentStatus) {
+                for (var offset = 1; offset <= 48; offset++) {
+                    var slot = (currentSlot + offset) % 48;
+                    var key = String(Math.floor(slot / 2) + 1);
+                    var status = normalizeHalfHourStatus(currentGroupData[key], slot % 2);
+                    if (!status) continue;
+                    if (status !== currentStatus) {
                         var target = new Date(now);
-                        target.setHours(currentHour + offset, 0, 0, 0);
-
+                        target.setSeconds(0, 0);
+                        target.setMinutes(Math.floor(target.getMinutes() / 30) * 30);
+                        target.setMinutes(target.getMinutes() + offset * 30);
                         nextEvent = {
                             time: target,
-                            status: nextStatus,
+                            status: status,
                             key: activeRegion + '_' + activeGroup + '_' + target.getFullYear() + '_' +
-                                target.getMonth() + '_' + target.getDate() + '_' + target.getHours()
+                                target.getMonth() + '_' + target.getDate() + '_' + target.getHours() + '_' + target.getMinutes()
                         };
                         break;
                     }
                 }
 
+                timerBox.style.display = 'block';
                 if (!nextEvent) {
-                    timerBox.style.display = 'block';
                     timerText.textContent = 'Наступних змін у графіку не знайдено.';
                     return;
                 }
-
                 var diff = nextEvent.time.getTime() - now.getTime();
                 var secondsLeft = Math.max(0, Math.floor(diff / 1000));
                 var minutesLeft = Math.floor(secondsLeft / 60);
                 var seconds = secondsLeft % 60;
-
                 var eventText = nextEvent.status === 'yes'
-                    ? 'Світло з’явиться'
-                    : 'Світло зникне';
-
-                timerBox.style.display = 'block';
+                    ? 'За графіком очікується відновлення електропостачання'
+                    : 'За графіком очікується відключення електроенергії';
 
                 if (diff > 0 && diff <= noticeMinutes * 60 * 1000) {
-                    timerText.textContent = eventText + ' через ' +
-                        minutesLeft + ' хв ' + String(seconds).padStart(2, '0') + ' сек';
-
+                    timerText.textContent = eventText + ' через ' + minutesLeft +
+                        ' хв ' + String(seconds).padStart(2, '0') + ' сек';
                     if (!alertedEvents[nextEvent.key]) {
                         alertedEvents[nextEvent.key] = true;
                         sendActivePageAlert(eventText, nextEvent);
                     }
                 } else {
                     var hh = String(nextEvent.time.getHours()).padStart(2, '0');
-                    timerText.textContent = 'Наступна зміна о ' + hh + ':00. Попередження за ' +
-                        noticeMinutes + ' хвилин.';
-                }
-
-                if (diff <= 0) {
-                    timerText.textContent = 'Час зміни статусу настав. Оновлюємо графік...';
-                    refreshScheduleData();
+                    var mm = String(nextEvent.time.getMinutes()).padStart(2, '0');
+                    timerText.textContent = 'Наступна зміна за графіком о ' + hh + ':' + mm +
+                        '. Попередження за ' + noticeMinutes + ' хвилин.';
                 }
             }
 
@@ -1140,9 +1157,18 @@ final class UA_Light_Alert {
                     soundEl.play().catch(function() {});
                 }
 
-                if (navigator.vibrate) {
-                    navigator.vibrate([500, 200, 500]);
+                if (voiceEnabled && 'speechSynthesis' in window && 'SpeechSynthesisUtterance' in window) {
+                    try {
+                        window.speechSynthesis.cancel();
+                        var spoken = new SpeechSynthesisUtterance(message + '. Час за графіком: ' +
+                            String(event.time.getHours()).padStart(2, '0') + ':' +
+                            String(event.time.getMinutes()).padStart(2, '0') + '.');
+                        spoken.lang = 'uk-UA';
+                        spoken.volume = voiceVolume;
+                        window.speechSynthesis.speak(spoken);
+                    } catch (e) {}
                 }
+                if (navigator.vibrate) navigator.vibrate([250, 120, 250]);
 
                 if ('Notification' in window && Notification.permission === 'granted') {
                     registerPwaServiceWorker().then(function(registration) {

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: UA Light Alert
  * Description: Графіки відключень, CRM рекламодавців та сповіщення про зміни електропостачання.
- * Version: 4.5.9
+ * Version: 4.6.0
  * Plugin URI: https://uaserver.pp.ua/svitlo/
  * Update URI: https://github.com/portallcomua/UA-Light-Alert
  * Author: UAServer
@@ -60,10 +60,10 @@ final class UA_Light_Alert {
             // requests through WordPress query parameters: page caches/security
             // plugins may return HTML or block those requests, making Chrome reject
             // the manifest. One square SVG scales cleanly for both required sizes.
-            $icon_url = plugin_dir_url(__FILE__) . 'assets/icons/ua-light-alert-icon.svg';
+            $icon_base_url = plugin_dir_url(__FILE__) . 'assets/icons/';
             $icons = [
-                ['src' => $icon_url, 'sizes' => '192x192', 'type' => 'image/svg+xml', 'purpose' => 'any'],
-                ['src' => $icon_url, 'sizes' => '512x512', 'type' => 'image/svg+xml', 'purpose' => 'any'],
+                ['src' => $icon_base_url . 'ua-light-alert-icon-192.png', 'sizes' => '192x192', 'type' => 'image/png', 'purpose' => 'any'],
+                ['src' => $icon_base_url . 'ua-light-alert-icon-512.png', 'sizes' => '512x512', 'type' => 'image/png', 'purpose' => 'any'],
             ];
             $manifest = [
                 'name' => get_bloginfo('name') . ' — UA Light Alert',

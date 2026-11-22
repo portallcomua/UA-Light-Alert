@@ -187,6 +187,22 @@ final class UA_Light_Alert_Push {
         $lead = in_array((int) $settings['notice_minutes'], [1, 5, 10], true) ? (int) $settings['notice_minutes'] : 5;
         $now = current_datetime();
 
+        // Quiet hours suppress scheduled push alerts as well as on-page sounds.
+        $quietStart = isset($settings['quiet_start']) ? (string) $settings['quiet_start'] : '';
+        $quietEnd = isset($settings['quiet_end']) ? (string) $settings['quiet_end'] : '';
+        if (preg_match('/^(?:[01]\\d|2[0-3]):[0-5]\\d$/', $quietStart)
+            && preg_match('/^(?:[01]\\d|2[0-3]):[0-5]\\d$/', $quietEnd)
+            && $quietStart !== $quietEnd) {
+            $currentTime = $now->format('H:i');
+            $isQuiet = $quietStart < $quietEnd
+                ? ($currentTime >= $quietStart && $currentTime < $quietEnd)
+                : ($currentTime >= $quietStart || $currentTime < $quietEnd);
+            if ($isQuiet) {
+                update_option(self::LAST_STATUS_OPTION, 'quiet_hours', false);
+                return;
+            }
+        }
+
         foreach ($subscriptions as $id => $subscription) {
             if (empty($subscription['region']) || empty($subscription['group']) || empty($subscription['endpoint'])) {
                 continue;

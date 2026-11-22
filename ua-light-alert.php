@@ -2,7 +2,7 @@
 /**
  * Plugin Name: UA Light Alert
  * Description: Графіки відключень, CRM рекламодавців та сповіщення про зміни електропостачання.
- * Version: 4.5.6
+ * Version: 4.5.7
  * Plugin URI: https://uaserver.pp.ua/svitlo/
  * Update URI: https://github.com/portallcomua/UA-Light-Alert
  * Author: UAServer
@@ -82,13 +82,16 @@ final class UA_Light_Alert {
                 'description' => 'Графіки та сповіщення про відключення електроенергії',
                 'start_url' => $start_url,
                 'scope' => home_url('/'),
-                'id' => home_url('/'),
+                // Keep the app identity equal to the original start URL. This also
+                // preserves detection of installations created before the explicit
+                // manifest "id" field was introduced.
+                'id' => $start_url,
                 'display' => 'standalone',
                 'prefer_related_applications' => false,
                 'related_applications' => [[
                     'platform' => 'webapp',
                     'url' => add_query_arg(['ua_light_manifest' => '1', 'ua_light_start' => $start_url], home_url('/')),
-                    'id' => home_url('/')
+                    'id' => $start_url
                 ]],
                 'background_color' => '#ffffff',
                 'theme_color' => '#ff6b00',
@@ -977,8 +980,11 @@ final class UA_Light_Alert {
                 if (!navigator.getInstalledRelatedApps || isPwaInstalled()) return;
                 navigator.getInstalledRelatedApps().then(function(apps) {
                     if (!Array.isArray(apps)) return;
+                    // getInstalledRelatedApps() only returns apps explicitly declared
+                    // in this manifest, so matching the platform is sufficient. Do not
+                    // reject older installs merely because Chrome derived a legacy app id.
                     var installed = apps.some(function(app) {
-                        return app && app.platform === 'webapp' && (!app.id || app.id === <?php echo wp_json_encode(home_url('/')); ?>);
+                        return app && app.platform === 'webapp';
                     });
                     if (installed) hideInstallButton();
                 }).catch(function() {});
@@ -1774,6 +1780,32 @@ final class UA_Light_Alert_GitHub_Updater {
 
         add_filter('plugins_api', [$this, 'plugin_information'], 20, 3);
         add_filter('upgrader_source_selection', [$this, 'normalize_package_directory'], 10, 4);
+
+        // Force a fresh GitHub release check whenever the administrator opens
+        // Plugins. This avoids WordPress keeping a stale update transient and
+        // makes the update appear on the very page where it is expected.
+        add_action('load-plugins.php', [$this, 'refresh_update_check']);
+    }
+
+    public function refresh_update_check() {
+        if (!current_user_can('update_plugins')) {
+            return;
+        }
+
+        if (!function_exists('wp_update_plugins')) {
+            require_once ABSPATH . 'wp-includes/update.php';
+        }
+
+        delete_transient(self::CACHE_KEY);
+
+        // Reset only the update-check timestamp, preserving other plugin data.
+        $stored = get_site_option('_site_transient_update_plugins');
+        if (is_object($stored)) {
+            $stored->last_checked = 0;
+            update_site_option('_site_transient_update_plugins', $stored);
+        }
+
+        wp_update_plugins();
     }
 
     private function get_release($force = false) {

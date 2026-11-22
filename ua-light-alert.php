@@ -42,20 +42,30 @@ final class UA_Light_Alert {
 
     public function serve_pwa_resources() {
         if (isset($_GET['ua_light_manifest'])) {
-            $icon = get_site_icon_url(512);
+            $icon_192 = get_site_icon_url(192);
+            $icon_512 = get_site_icon_url(512);
+            $start_url = home_url('/');
+            $referrer = !empty($_SERVER['HTTP_REFERER']) ? esc_url_raw(wp_unslash($_SERVER['HTTP_REFERER'])) : '';
+            if ($referrer && wp_parse_url($referrer, PHP_URL_HOST) === wp_parse_url(home_url('/'), PHP_URL_HOST)) {
+                $start_url = $referrer;
+            }
+            $icons = [];
+            if ($icon_192) {
+                $icons[] = ['src' => $icon_192, 'sizes' => '192x192', 'type' => 'image/png', 'purpose' => 'any'];
+            }
+            if ($icon_512) {
+                $icons[] = ['src' => $icon_512, 'sizes' => '512x512', 'type' => 'image/png', 'purpose' => 'any'];
+            }
             $manifest = [
                 'name' => get_bloginfo('name') . ' — UA Light Alert',
                 'short_name' => 'UA Light Alert',
                 'description' => 'Графіки та сповіщення про відключення електроенергії',
-                'start_url' => home_url('/'),
+                'start_url' => $start_url,
                 'scope' => home_url('/'),
                 'display' => 'standalone',
                 'background_color' => '#ffffff',
                 'theme_color' => '#ff6b00',
-                'icons' => $icon ? [
-                    ['src' => $icon, 'sizes' => '192x192', 'type' => 'image/png', 'purpose' => 'any'],
-                    ['src' => $icon, 'sizes' => '512x512', 'type' => 'image/png', 'purpose' => 'any']
-                ] : []
+                'icons' => $icons
             ];
             nocache_headers();
             header('Content-Type: application/manifest+json; charset=utf-8');

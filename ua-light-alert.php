@@ -2,7 +2,7 @@
 /**
  * Plugin Name: UA Light Alert
  * Description: Графіки відключень, CRM рекламодавців та сповіщення про зміни електропостачання.
- * Version: 4.5.2
+ * Version: 4.5.3
  * Plugin URI: https://uaserver.pp.ua/svitlo/
  * Update URI: https://github.com/portallcomua/UA-Light-Alert
  * Author: UAServer
@@ -82,7 +82,9 @@ final class UA_Light_Alert {
                 'description' => 'Графіки та сповіщення про відключення електроенергії',
                 'start_url' => $start_url,
                 'scope' => home_url('/'),
+                'id' => home_url('/'),
                 'display' => 'standalone',
+                'prefer_related_applications' => false,
                 'background_color' => '#ffffff',
                 'theme_color' => '#ff6b00',
                 'icons' => $icons
@@ -736,7 +738,7 @@ final class UA_Light_Alert {
                 </button>
 
                 <div class="ua-pwa-install-wrap">
-                    <button type="button" id="ua-pwa-install" class="ua-pwa-install" aria-label="Встановити додаток Графік відключень">
+                    <button type="button" id="ua-pwa-install" class="ua-pwa-install" aria-label="Встановити додаток Графік відключень" hidden>
                         <span class="ua-pwa-install-icon" aria-hidden="true">⬇</span>
                         Встановити додаток Графік відключень
                     </button>
@@ -978,10 +980,18 @@ final class UA_Light_Alert {
             if (isPwaInstalled()) {
                 hideInstallButton();
             } else {
+                var initialUa = window.navigator.userAgent || '';
+                var isIosInstall = /iphone|ipad|ipod/i.test(initialUa);
+                // iOS Safari has no beforeinstallprompt event; only there show the manual Add to Home Screen flow.
+                if (isIosInstall && installButton) installButton.hidden = false;
+
                 window.addEventListener('beforeinstallprompt', function(event) {
                     event.preventDefault();
                     deferredInstallPrompt = event;
-                    if (installButton) installButton.style.display = 'inline-flex';
+                    if (installButton) {
+                        installButton.hidden = false;
+                        installButton.style.display = 'inline-flex';
+                    }
                 });
 
                 window.addEventListener('appinstalled', function() {
@@ -1012,8 +1022,8 @@ final class UA_Light_Alert {
                         var isIos = /iphone|ipad|ipod/i.test(ua);
                         if (isIos) {
                             showInstallHelp('Щоб встановити додаток на iPhone: натисніть «Поділитися» у Safari, потім «На початковий екран» і «Додати».');
-                        } else {
-                            showInstallHelp('Браузер поки не надав команду швидкого встановлення. Відкрийте меню браузера та виберіть «Встановити додаток» або «Додати на головний екран».');
+                        } else if (isIos) {
+                            showInstallHelp('Щоб встановити додаток на iPhone: натисніть «Поділитися» у Safari, потім «На початковий екран» і «Додати».');
                         }
                     });
                 }

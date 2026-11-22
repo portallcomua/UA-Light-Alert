@@ -1,88 +1,132 @@
 <?php
 /**
  * Plugin Name: UA Light Alert
- * Description: Відображення графіків відключень + CRM + Звукове оповіщення
- * Version: 4.0
- * Author: You
+ * Description: Графіки відключень, CRM рекламодавців та сповіщення про зміни електропостачання.
+ * Version: 4.1.0
+ * Author: UA Tools
+ * Text Domain: ua-light-alert
  */
 
-if (!defined('ABSPATH')) exit;
+if (!defined('ABSPATH')) {
+    exit;
+}
 
-class UA_Light_Alert {
+final class UA_Light_Alert {
 
     private $option_key = 'ua_light_ads';
     private $settings_key = 'ua_light_settings';
 
     public function __construct() {
         add_shortcode('ua_light_schedule', [$this, 'render_frontend']);
+
         add_action('admin_menu', [$this, 'add_admin_menu']);
         add_action('admin_init', [$this, 'handle_admin_actions']);
+
         add_action('wp_ajax_ua_track_ad', [$this, 'track_ad_click']);
         add_action('wp_ajax_nopriv_ua_track_ad', [$this, 'track_ad_click']);
+
+        add_action('wp_ajax_ua_get_ads', 'ua_light_get_ads');
+        add_action('wp_ajax_nopriv_ua_get_ads', 'ua_light_get_ads');
     }
 
-    /* ---------- Адмінка ---------- */
+    private function default_settings() {
+        return [
+            'notice_minutes' => 5,
+            'sound_url'      => '',
+        ];
+    }
+
+    private function get_settings() {
+        $settings = get_option($this->settings_key, []);
+        return wp_parse_args(is_array($settings) ? $settings : [], $this->default_settings());
+    }
+
+    /* ---------------------------------------------------------
+     * ADMIN
+     * ------------------------------------------------------ */
 
     public function add_admin_menu() {
-        add_menu_page('UA Light Alert', 'UA Light Alert', 'manage_options', 'ua-light-alert', [$this, 'render_admin_page'], 'dashicons-lightbulb', 30);
+        add_menu_page(
+            'UA Light Alert',
+            'UA Light Alert',
+            'manage_options',
+            'ua-light-alert',
+            [$this, 'render_admin_page'],
+            'dashicons-lightbulb',
+            30
+        );
     }
 
     public function handle_admin_actions() {
-        if (!current_user_can('manage_options')) return;
+        if (!current_user_can('manage_options')) {
+            return;
+        }
 
-        // Збереження налаштувань (хвилини попередження)
-        if (isset($_POST['ua_save_settings']) && check_admin_referer('ua_settings_action')) {
+        if (isset($_POST['ua_save_settings'])) {
+            check_admin_referer('ua_settings_action');
+
             $settings = [
-                'notice_minutes' => intval($_POST['notice_minutes']),
-                'sound_url' => esc_url_raw($_POST['sound_url'])
+                'notice_minutes' => max(1, min(120, absint($_POST['notice_minutes'] ?? 5))),
+                'sound_url'      => esc_url_raw(wp_unslash($_POST['sound_url'] ?? '')),
             ];
+
             update_option($this->settings_key, $settings);
-            wp_redirect(admin_url('admin.php?page=ua-light-alert&msg=settings_saved'));
+
+            wp_safe_redirect(admin_url('admin.php?page=ua-light-alert&msg=settings_saved'));
             exit;
         }
 
-        // Додавання / Редагування рекламодавця
-        if (isset($_POST['ua_save_ad']) && check_admin_referer('ua_save_ad_action')) {
+        if (isset($_POST['ua_save_ad'])) {
+            check_admin_referer('ua_save_ad_action');
+
             $ads = get_option($this->option_key, []);
-            $ad_id = isset($_POST['ad_id']) ? intval($_POST['ad_id']) : -1;
-            
+            if (!is_array($ads)) {
+                $ads = [];
+            }
+
+            $ad_id = isset($_POST['ad_id']) ? absint($_POST['ad_id']) : -1;
+
             $ad_data = [
-                'name'    => sanitize_text_field($_POST['ad_name']),
-                'email'   => sanitize_email($_POST['ad_email']),
-                'contacts'=> sanitize_textarea_field($_POST['ad_contacts']),
-                'region'  => sanitize_text_field($_POST['ad_region']),
-                'group'   => sanitize_text_field($_POST['ad_group']),
-                'html'    => wp_kses_post($_POST['ad_html']),
-                'cost'    => sanitize_text_field($_POST['ad_cost']),
-                'period_start' => sanitize_text_field($_POST['ad_period_start']),
-                'period_end'   => sanitize_text_field($_POST['ad_period_end']),
-                'payment_info' => sanitize_textarea_field($_POST['ad_payment_info']),
+                'name'         => sanitize_text_field(wp_unslash($_POST['ad_name'] ?? '')),
+                'email'        => sanitize_email(wp_unslash($_POST['ad_email'] ?? '')),
+                'contacts'     => sanitize_textarea_field(wp_unslash($_POST['ad_contacts'] ?? '')),
+                'region'       => sanitize_text_field(wp_unslash($_POST['ad_region'] ?? '')),
+                'group'        => sanitize_text_field(wp_unslash($_POST['ad_group'] ?? '')),
+                'html'         => wp_kses_post(wp_unslash($_POST['ad_html'] ?? '')),
+                'cost'         => sanitize_text_field(wp_unslash($_POST['ad_cost'] ?? '')),
+                'period_start' => sanitize_text_field(wp_unslash($_POST['ad_period_start'] ?? '')),
+                'period_end'   => sanitize_text_field(wp_unslash($_POST['ad_period_end'] ?? '')),
+                'payment_info' => sanitize_textarea_field(wp_unslash($_POST['ad_payment_info'] ?? '')),
             ];
 
             if ($ad_id >= 0 && isset($ads[$ad_id])) {
-                $ad_data['impressions'] = $ads[$ad_id]['impressions'] ?? 0;
-                $ad_data['clicks'] = $ads[$ad_id]['clicks'] ?? 0;
+                $ad_data['impressions'] = absint($ads[$ad_id]['impressions'] ?? 0);
+                $ad_data['clicks'] = absint($ads[$ad_id]['clicks'] ?? 0);
                 $ads[$ad_id] = $ad_data;
             } else {
                 $ad_data['impressions'] = 0;
                 $ad_data['clicks'] = 0;
                 $ads[] = $ad_data;
             }
+
             update_option($this->option_key, $ads);
-            wp_redirect(admin_url('admin.php?page=ua-light-alert&msg=saved'));
+
+            wp_safe_redirect(admin_url('admin.php?page=ua-light-alert&msg=saved'));
             exit;
         }
 
-        // Видалення
-        if (isset($_GET['delete_ad']) && isset($_GET['_wpnonce'])) {
-            if (wp_verify_nonce($_GET['_wpnonce'], 'ua_delete_ad')) {
+        if (isset($_GET['delete_ad'], $_GET['_wpnonce'])) {
+            $index = absint($_GET['delete_ad']);
+
+            if (wp_verify_nonce(sanitize_text_field(wp_unslash($_GET['_wpnonce'])), 'ua_delete_ad')) {
                 $ads = get_option($this->option_key, []);
-                $index = intval($_GET['delete_ad']);
-                if (isset($ads[$index])) {
+
+                if (is_array($ads) && isset($ads[$index])) {
                     unset($ads[$index]);
                     update_option($this->option_key, array_values($ads));
                 }
-                wp_redirect(admin_url('admin.php?page=ua-light-alert&msg=deleted'));
+
+                wp_safe_redirect(admin_url('admin.php?page=ua-light-alert&msg=deleted'));
                 exit;
             }
         }
@@ -90,113 +134,180 @@ class UA_Light_Alert {
 
     public function render_admin_page() {
         $ads = get_option($this->option_key, []);
-        $settings = get_option($this->settings_key, ['notice_minutes' => 30, 'sound_url' => '']);
-        
-        $edit_id = isset($_GET['edit_ad']) ? intval($_GET['edit_ad']) : -1;
-        $edit_ad = ($edit_id >= 0 && isset($ads[$edit_id])) ? $ads[$edit_id] : null;
-
-        if (isset($_GET['msg'])) {
-            echo '<div class="notice notice-success is-dismissible"><p>Зміни збережено!</p></div>';
+        if (!is_array($ads)) {
+            $ads = [];
         }
+
+        $settings = $this->get_settings();
+
+        $edit_id = isset($_GET['edit_ad']) ? absint($_GET['edit_ad']) : -1;
+        $edit_ad = ($edit_id >= 0 && isset($ads[$edit_id])) ? $ads[$edit_id] : null;
         ?>
         <div class="wrap">
-            <h1>UA Light Alert — Налаштування та Рекламодавці</h1>
+            <h1>UA Light Alert — Налаштування та рекламодавці</h1>
 
-            <!-- Налаштування звуку -->
-            <div style="background: #fff; padding: 20px; border: 1px solid #ccd0d4; margin-bottom: 20px;">
-                <h2>🔔 Налаштування звукового оповіщення</h2>
+            <?php if (isset($_GET['msg'])) : ?>
+                <div class="notice notice-success is-dismissible">
+                    <p>Зміни збережено.</p>
+                </div>
+            <?php endif; ?>
+
+            <div style="background:#fff;padding:20px;border:1px solid #ccd0d4;margin:20px 0;">
+                <h2>🔔 Налаштування сповіщень</h2>
+
                 <form method="post">
                     <?php wp_nonce_field('ua_settings_action'); ?>
+
                     <table class="form-table">
                         <tr>
-                            <th>Попереджати за (хвилин)</th>
+                            <th scope="row">Попереджати за (хвилин)</th>
                             <td>
-                                <input type="number" name="notice_minutes" value="<?php echo esc_attr($settings['notice_minutes']); ?>" min="1" max="120">
-                                <p class="description">Якщо до зміни статусу залишиться менше цього часу, з'явиться таймер.</p>
+                                <input
+                                    type="number"
+                                    name="notice_minutes"
+                                    value="<?php echo esc_attr($settings['notice_minutes']); ?>"
+                                    min="1"
+                                    max="120"
+                                    required
+                                >
+                                <p class="description">
+                                    За скільки хвилин до відключення або відновлення показувати попередження.
+                                    За замовчуванням — 5 хвилин.
+                                </p>
                             </td>
                         </tr>
+
                         <tr>
-                            <th>Посилання на MP3 файл</th>
+                            <th scope="row">Звуковий файл MP3</th>
                             <td>
-                                <input type="url" name="sound_url" value="<?php echo esc_attr($settings['sound_url']); ?>" class="regular-text" placeholder="https://ваш-сайт.com/wp-content/uploads/alert.mp3">
-                                <p class="description">Завантажте mp3-файл через "Медіафайли" і скопіюйте його URL сюди.</p>
+                                <input
+                                    type="url"
+                                    name="sound_url"
+                                    value="<?php echo esc_attr($settings['sound_url']); ?>"
+                                    class="regular-text"
+                                    placeholder="https://ваш-сайт.ua/wp-content/uploads/alert.mp3"
+                                >
+                                <p class="description">
+                                    Завантажте MP3 у розділ «Медіафайли» та вставте URL.
+                                    Власний звук відтворюється на відкритій сторінці.
+                                </p>
                             </td>
                         </tr>
                     </table>
+
                     <?php submit_button('Зберегти налаштування', 'primary', 'ua_save_settings'); ?>
                 </form>
             </div>
 
-            <div style="display:flex; gap:20px; align-items:flex-start;">
-                <!-- Форма рекламодавця -->
-                <div style="flex: 1; background: #fff; padding: 20px; border: 1px solid #ccd0d4;">
+            <div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap;">
+                <div style="flex:1;min-width:300px;background:#fff;padding:20px;border:1px solid #ccd0d4;">
                     <h2><?php echo $edit_ad ? 'Редагувати клієнта' : 'Додати нового клієнта'; ?></h2>
+
                     <form method="post">
                         <?php wp_nonce_field('ua_save_ad_action'); ?>
-                        <?php if ($edit_ad): ?>
-                            <input type="hidden" name="ad_id" value="<?php echo $edit_id; ?>">
+
+                        <?php if ($edit_ad) : ?>
+                            <input type="hidden" name="ad_id" value="<?php echo esc_attr($edit_id); ?>">
                         <?php endif; ?>
-                        
+
                         <table class="form-table">
                             <tr>
-                                <th>Назва компанії</th>
-                                <td><input type="text" name="ad_name" required class="regular-text" value="<?php echo esc_attr($edit_ad['name'] ?? ''); ?>"></td>
-                            </tr>
-                            <tr>
-                                <th>Email</th>
-                                <td><input type="email" name="ad_email" class="regular-text" value="<?php echo esc_attr($edit_ad['email'] ?? ''); ?>"></td>
-                            </tr>
-                            <tr>
-                                <th>Загальні контакти</th>
-                                <td><textarea name="ad_contacts" rows="3" class="large-text"><?php echo esc_textarea($edit_ad['contacts'] ?? ''); ?></textarea></td>
-                            </tr>
-                            <tr>
-                                <th>Регіон (regionId)</th>
+                                <th scope="row">Назва компанії</th>
                                 <td>
-                                    <input type="text" name="ad_region" placeholder="напр. kyiv" class="regular-text" value="<?php echo esc_attr($edit_ad['region'] ?? ''); ?>">
+                                    <input type="text" name="ad_name" required class="regular-text"
+                                        value="<?php echo esc_attr($edit_ad['name'] ?? ''); ?>">
                                 </td>
                             </tr>
+
                             <tr>
-                                <th>Група</th>
+                                <th scope="row">Email</th>
                                 <td>
-                                    <input type="text" name="ad_group" placeholder="напр. 3.1" class="regular-text" value="<?php echo esc_attr($edit_ad['group'] ?? ''); ?>">
+                                    <input type="email" name="ad_email" class="regular-text"
+                                        value="<?php echo esc_attr($edit_ad['email'] ?? ''); ?>">
                                 </td>
                             </tr>
+
                             <tr>
-                                <th>HTML реклами</th>
-                                <td><textarea name="ad_html" rows="4" class="large-text" required><?php echo esc_textarea($edit_ad['html'] ?? ''); ?></textarea></td>
-                            </tr>
-                            <tr>
-                                <th>Вартість</th>
-                                <td><input type="text" name="ad_cost" class="regular-text" value="<?php echo esc_attr($edit_ad['cost'] ?? ''); ?>"></td>
-                            </tr>
-                            <tr>
-                                <th>Період</th>
+                                <th scope="row">Контакти</th>
                                 <td>
-                                    <input type="date" name="ad_period_start" value="<?php echo esc_attr($edit_ad['period_start'] ?? ''); ?>">
+                                    <textarea name="ad_contacts" rows="3" class="large-text"><?php
+                                        echo esc_textarea($edit_ad['contacts'] ?? '');
+                                    ?></textarea>
+                                </td>
+                            </tr>
+
+                            <tr>
+                                <th scope="row">Регіон (regionId)</th>
+                                <td>
+                                    <input type="text" name="ad_region" class="regular-text"
+                                        placeholder="kyiv"
+                                        value="<?php echo esc_attr($edit_ad['region'] ?? ''); ?>">
+                                </td>
+                            </tr>
+
+                            <tr>
+                                <th scope="row">Група</th>
+                                <td>
+                                    <input type="text" name="ad_group" class="regular-text"
+                                        placeholder="3.1"
+                                        value="<?php echo esc_attr($edit_ad['group'] ?? ''); ?>">
+                                </td>
+                            </tr>
+
+                            <tr>
+                                <th scope="row">HTML реклами</th>
+                                <td>
+                                    <textarea name="ad_html" rows="5" class="large-text" required><?php
+                                        echo esc_textarea($edit_ad['html'] ?? '');
+                                    ?></textarea>
+                                </td>
+                            </tr>
+
+                            <tr>
+                                <th scope="row">Вартість</th>
+                                <td>
+                                    <input type="text" name="ad_cost" class="regular-text"
+                                        value="<?php echo esc_attr($edit_ad['cost'] ?? ''); ?>">
+                                </td>
+                            </tr>
+
+                            <tr>
+                                <th scope="row">Період показу</th>
+                                <td>
+                                    <input type="date" name="ad_period_start"
+                                        value="<?php echo esc_attr($edit_ad['period_start'] ?? ''); ?>">
                                     &mdash;
-                                    <input type="date" name="ad_period_end" value="<?php echo esc_attr($edit_ad['period_end'] ?? ''); ?>">
+                                    <input type="date" name="ad_period_end"
+                                        value="<?php echo esc_attr($edit_ad['period_end'] ?? ''); ?>">
                                 </td>
                             </tr>
+
                             <tr>
-                                <th>Коли і як сплачено</th>
-                                <td><textarea name="ad_payment_info" rows="2" class="large-text"><?php echo esc_textarea($edit_ad['payment_info'] ?? ''); ?></textarea></td>
+                                <th scope="row">Оплата</th>
+                                <td>
+                                    <textarea name="ad_payment_info" rows="2" class="large-text"><?php
+                                        echo esc_textarea($edit_ad['payment_info'] ?? '');
+                                    ?></textarea>
+                                </td>
                             </tr>
                         </table>
-                        
+
                         <?php submit_button($edit_ad ? 'Зберегти зміни' : 'Додати клієнта', 'primary', 'ua_save_ad'); ?>
-                        <?php if ($edit_ad): ?>
-                            <a href="<?php echo admin_url('admin.php?page=ua-light-alert'); ?>" class="button">Скасувати</a>
+
+                        <?php if ($edit_ad) : ?>
+                            <a href="<?php echo esc_url(admin_url('admin.php?page=ua-light-alert')); ?>" class="button">
+                                Скасувати
+                            </a>
                         <?php endif; ?>
                     </form>
                 </div>
 
-                <!-- Список рекламодавців -->
-                <div style="flex: 2;">
+                <div style="flex:2;min-width:320px;">
                     <h2>База клієнтів та статистика</h2>
-                    <?php if (empty($ads)): ?>
+
+                    <?php if (empty($ads)) : ?>
                         <p>Ще немає клієнтів.</p>
-                    <?php else: ?>
+                    <?php else : ?>
                         <table class="wp-list-table widefat fixed striped">
                             <thead>
                                 <tr>
@@ -208,31 +319,46 @@ class UA_Light_Alert {
                                 </tr>
                             </thead>
                             <tbody>
-                            <?php foreach ($ads as $i => $ad): ?>
-                                <tr>
-                                    <td>
-                                        <strong><?php echo esc_html($ad['name']); ?></strong><br>
-                                        <small><?php echo esc_html($ad['email']); ?></small>
-                                    </td>
-                                    <td style="font-size:12px;">
-                                        <?php echo nl2br(esc_html($ad['contacts'])); ?>
-                                    </td>
-                                    <td style="font-size:12px;">
-                                        <b>Регіон:</b> <?php echo esc_html($ad['region'] ?: 'Усі'); ?><br>
-                                        <b>Група:</b> <?php echo esc_html($ad['group'] ?: 'Усі'); ?><br>
-                                        <b>Вартість:</b> <?php echo esc_html($ad['cost']); ?><br>
-                                        <b>Період:</b> <?php echo esc_html($ad['period_start']); ?> - <?php echo esc_html($ad['period_end']); ?>
-                                    </td>
-                                    <td style="font-size:12px;">
-                                        👁 Показів: <b><?php echo intval($ad['impressions'] ?? 0); ?></b><br>
-                                        🖱 Кліків: <b><?php echo intval($ad['clicks'] ?? 0); ?></b>
-                                    </td>
-                                    <td>
-                                        <a href="<?php echo admin_url('admin.php?page=ua-light-alert&edit_ad=' . $i); ?>">Редагувати</a> | 
-                                        <a href="<?php echo wp_nonce_url(add_query_arg(['delete_ad' => $i], admin_url('admin.php?page=ua-light-alert')), 'ua_delete_ad'); ?>" onclick="return confirm('Видалити?')" style="color:red;">Видалити</a>
-                                    </td>
-                                </tr>
-                            <?php endforeach; ?>
+                                <?php foreach ($ads as $i => $ad) : ?>
+                                    <tr>
+                                        <td>
+                                            <strong><?php echo esc_html($ad['name'] ?? ''); ?></strong><br>
+                                            <small><?php echo esc_html($ad['email'] ?? ''); ?></small>
+                                        </td>
+                                        <td>
+                                            <?php echo nl2br(esc_html($ad['contacts'] ?? '')); ?>
+                                        </td>
+                                        <td>
+                                            <b>Регіон:</b> <?php echo esc_html($ad['region'] ?: 'Усі'); ?><br>
+                                            <b>Група:</b> <?php echo esc_html($ad['group'] ?: 'Усі'); ?><br>
+                                            <b>Вартість:</b> <?php echo esc_html($ad['cost'] ?? ''); ?><br>
+                                            <b>Період:</b>
+                                            <?php echo esc_html($ad['period_start'] ?? ''); ?> —
+                                            <?php echo esc_html($ad['period_end'] ?? ''); ?>
+                                        </td>
+                                        <td>
+                                            👁 Показів: <b><?php echo absint($ad['impressions'] ?? 0); ?></b><br>
+                                            🖱 Кліків: <b><?php echo absint($ad['clicks'] ?? 0); ?></b>
+                                        </td>
+                                        <td>
+                                            <a href="<?php echo esc_url(admin_url('admin.php?page=ua-light-alert&edit_ad=' . $i)); ?>">
+                                                Редагувати
+                                            </a>
+                                            |
+                                            <a
+                                                href="<?php echo esc_url(wp_nonce_url(
+                                                    add_query_arg(
+                                                        ['delete_ad' => $i],
+                                                        admin_url('admin.php?page=ua-light-alert')
+                                                    ),
+                                                    'ua_delete_ad'
+                                                )); ?>"
+                                                onclick="return confirm('Видалити рекламодавця?')"
+                                                style="color:red;"
+                                            >Видалити</a>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
                             </tbody>
                         </table>
                     <?php endif; ?>
@@ -242,25 +368,33 @@ class UA_Light_Alert {
         <?php
     }
 
-    /* ---------- Фронтенд ---------- */
+    /* ---------------------------------------------------------
+     * FRONTEND
+     * ------------------------------------------------------ */
 
     public function render_frontend() {
-        $settings = get_option($this->settings_key, ['notice_minutes' => 30, 'sound_url' => '']);
-        $notice_minutes = intval($settings['notice_minutes']);
-        $sound_url = $settings['sound_url'];
+        $settings = $this->get_settings();
+
+        $notice_minutes = absint($settings['notice_minutes']);
+        $sound_url = esc_url($settings['sound_url']);
+
+        $ajax_url = admin_url('admin-ajax.php');
+        $nonce = wp_create_nonce('ua_light_frontend');
 
         ob_start();
         ?>
-        <!-- Аудіоелемент для звуку -->
-        <audio id="ua-alert-sound" preload="auto">
-            <source src="<?php echo esc_url($sound_url); ?>" type="audio/mpeg">
-        </audio>
+        <div id="ua-light-widget" class="ua-light-widget">
+            <audio id="ua-alert-sound" preload="auto">
+                <?php if ($sound_url) : ?>
+                    <source src="<?php echo $sound_url; ?>" type="audio/mpeg">
+                <?php endif; ?>
+            </audio>
 
-        <div id="ua-light-widget" style="padding: 15px; border: 1px solid #eee; border-radius: 8px; font-family: sans-serif;">
             <div class="ua-controls">
-                <label style="display:block; margin-bottom:10px; font-weight:bold;">Регіон:
-                    <select id="ua-region" style="width: 100%; padding: 8px; margin-top:5px;">
-                        <option value="">— Оберіть —</option>
+                <label class="ua-field">
+                    <strong>Область:</strong>
+                    <select id="ua-region">
+                        <option value="">— Оберіть область —</option>
                         <option value="kyiv">Київ</option>
                         <option value="kyiv-region">Київська область</option>
                         <option value="odesa">Одеська область</option>
@@ -270,342 +404,672 @@ class UA_Light_Alert {
                     </select>
                 </label>
 
-                <label style="display:block; margin-bottom:10px; font-weight:bold;">Група:
-                    <select id="ua-group" style="width: 100%; padding: 8px; margin-top:5px;" disabled>
-                        <option value="">Спочатку оберіть регіон</option>
+                <label class="ua-field">
+                    <strong>Група:</strong>
+                    <select id="ua-group" disabled>
+                        <option value="">Спочатку оберіть область</option>
                     </select>
                 </label>
 
-                <button id="ua-show" style="padding: 10px 20px; background: #ff6b00; color: white; border: none; border-radius: 4px; font-weight: bold; width: 100%; cursor:pointer;">Показати графік та увімкнути таймер</button>
+                <button type="button" id="ua-show">
+                    Показати графік та увімкнути сповіщення
+                </button>
+
+                <p class="ua-help">
+                    Ваш вибір області та групи збережеться на цьому пристрої.
+                    Його можна змінити в будь-який момент.
+                </p>
             </div>
 
-            <!-- Блок таймера -->
-            <div id="ua-timer-box" style="display:none; margin-top:15px; padding:15px; background:#fff3cd; border-left:4px solid #ffc107; border-radius:4px;">
-                <h3 style="margin:0 0 10px 0; color:#856404;">⏳ Наступна зміна статусу:</h3>
-                <p id="ua-timer-text" style="font-size:24px; font-weight:bold; margin:0; color:#856404; text-align:center;">--:--</p>
+            <div id="ua-timer-box" class="ua-timer-box" style="display:none;">
+                <h3>⏳ Наступна зміна статусу</h3>
+                <div id="ua-timer-text">Очікування даних...</div>
             </div>
 
-            <div id="ua-result" style="margin-top:15px; font-size: 14px;"></div>
-            <div id="ua-ad-slot" style="margin-top:20px;"></div>
+            <div id="ua-notice" class="ua-notice" style="display:none;"></div>
+            <div id="ua-result" class="ua-result"></div>
+            <div id="ua-ad-slot" class="ua-ad-slot"></div>
         </div>
 
+        <style>
+            .ua-light-widget {
+                box-sizing: border-box;
+                width: 100%;
+                padding: 16px;
+                border: 1px solid #e2e2e2;
+                border-radius: 10px;
+                background: #fff;
+                color: #222;
+                font-family: Arial, sans-serif;
+            }
+            .ua-light-widget * { box-sizing: border-box; }
+            .ua-field {
+                display: block;
+                margin-bottom: 14px;
+            }
+            .ua-field select {
+                display: block;
+                width: 100%;
+                min-height: 42px;
+                margin-top: 6px;
+                padding: 8px;
+                border: 1px solid #ccc;
+                border-radius: 5px;
+                background: #fff;
+            }
+            #ua-show {
+                width: 100%;
+                min-height: 44px;
+                padding: 10px 15px;
+                border: 0;
+                border-radius: 5px;
+                background: #ff6b00;
+                color: #fff;
+                font-weight: bold;
+                cursor: pointer;
+            }
+            #ua-show:disabled { opacity: .6; }
+            .ua-help {
+                margin: 9px 0 0;
+                color: #666;
+                font-size: 12px;
+            }
+            .ua-timer-box {
+                margin-top: 15px;
+                padding: 15px;
+                border-left: 4px solid #f0ad00;
+                border-radius: 5px;
+                background: #fff3cd;
+                color: #765500;
+                text-align: center;
+            }
+            .ua-timer-box h3 {
+                margin: 0 0 8px;
+                font-size: 17px;
+            }
+            #ua-timer-text {
+                font-size: 20px;
+                font-weight: bold;
+            }
+            .ua-notice {
+                margin-top: 12px;
+                padding: 12px;
+                border-radius: 5px;
+                background: #e8f4ff;
+                color: #17466b;
+                font-weight: bold;
+            }
+            .ua-result { margin-top: 15px; }
+            .ua-result table {
+                width: 100%;
+                border-collapse: collapse;
+                text-align: center;
+                font-size: 13px;
+            }
+            .ua-result th, .ua-result td {
+                padding: 7px 4px;
+                border: 1px solid #ddd;
+            }
+            .ua-result th { background: #f3f3f3; }
+            .ua-ad-slot { margin-top: 20px; }
+            @media (max-width: 480px) {
+                .ua-light-widget { padding: 10px; }
+                .ua-result table { font-size: 12px; }
+                .ua-result th, .ua-result td { padding: 6px 2px; }
+            }
+        </style>
+
         <script>
-        document.addEventListener('DOMContentLoaded', function() {
+        (function() {
+            'use strict';
+
+            var widget = document.getElementById('ua-light-widget');
+            if (!widget || widget.dataset.initialized === '1') {
+                return;
+            }
+            widget.dataset.initialized = '1';
+
             var regionSelect = document.getElementById('ua-region');
             var groupSelect = document.getElementById('ua-group');
+            var showButton = document.getElementById('ua-show');
             var resultDiv = document.getElementById('ua-result');
             var adSlot = document.getElementById('ua-ad-slot');
             var timerBox = document.getElementById('ua-timer-box');
             var timerText = document.getElementById('ua-timer-text');
+            var noticeBox = document.getElementById('ua-notice');
             var soundEl = document.getElementById('ua-alert-sound');
-            
-            var currentData = null;
-            var timerInterval = null;
-            var noticeMinutes = <?php echo $notice_minutes; ?>;
 
-            regionSelect.addEventListener('change', function() {
-                var region = this.value;
-                groupSelect.innerHTML = '<option value="">Завантаження груп...</option>';
+            var currentData = null;
+            var currentGroupData = null;
+            var activeRegion = '';
+            var activeGroup = '';
+            var ticker = null;
+            var refreshTicker = null;
+            var noticeMinutes = <?php echo (int) $notice_minutes; ?>;
+            var ajaxUrl = <?php echo wp_json_encode($ajax_url); ?>;
+            var ajaxNonce = <?php echo wp_json_encode($nonce); ?>;
+
+            var storageKey = 'ua_light_alert_selection_v1';
+            var alertedEvents = {};
+
+            function saveSelection() {
+                try {
+                    localStorage.setItem(storageKey, JSON.stringify({
+                        region: regionSelect.value,
+                        group: groupSelect.value
+                    }));
+                } catch (e) {}
+            }
+
+            function readSelection() {
+                try {
+                    var saved = JSON.parse(localStorage.getItem(storageKey) || '{}');
+                    if (saved && saved.region) {
+                        regionSelect.value = saved.region;
+                        loadRegion(saved.region, saved.group || '');
+                    }
+                } catch (e) {}
+            }
+
+            function getLatestData(data) {
+                if (!data || !data.fact || !data.fact.data) {
+                    return null;
+                }
+
+                var keys = Object.keys(data.fact.data).sort();
+                if (!keys.length) {
+                    return null;
+                }
+
+                var latestKey = keys[keys.length - 1];
+                return data.fact.data[latestKey] || null;
+            }
+
+            function loadRegion(region, preferredGroup) {
+                currentData = null;
+                currentGroupData = null;
                 groupSelect.disabled = true;
+                groupSelect.innerHTML = '<option value="">Завантаження груп...</option>';
+
+                if (ticker) {
+                    clearInterval(ticker);
+                    ticker = null;
+                }
+                if (refreshTicker) {
+                    clearInterval(refreshTicker);
+                    refreshTicker = null;
+                }
+
+                timerBox.style.display = 'none';
                 resultDiv.innerHTML = '';
                 adSlot.innerHTML = '';
-                timerBox.style.display = 'none';
-                if(timerInterval) clearInterval(timerInterval);
 
                 if (!region) {
-                    groupSelect.innerHTML = '<option value="">Спочатку оберіть регіон</option>';
+                    groupSelect.innerHTML = '<option value="">Спочатку оберіть область</option>';
                     return;
                 }
 
-                fetch('https://raw.githubusercontent.com/Baskerville42/outage-data-ua/main/data/' + region + '.json')
-                    .then(r => r.json())
-                    .then(data => {
+                var url = 'https://raw.githubusercontent.com/Baskerville42/outage-data-ua/main/data/'
+                    + encodeURIComponent(region) + '.json';
+
+                fetch(url, {cache: 'no-store'})
+                    .then(function(response) {
+                        if (!response.ok) {
+                            throw new Error('Не вдалося отримати графік');
+                        }
+                        return response.json();
+                    })
+                    .then(function(data) {
                         currentData = data;
+
+                        var groupsData = getLatestData(data);
+                        if (!groupsData) {
+                            throw new Error('У файлі немає даних про групи');
+                        }
+
                         groupSelect.innerHTML = '<option value="">— Оберіть групу —</option>';
-                        
-                        if (data.fact && data.fact.data) {
-                            var timeKeys = Object.keys(data.fact.data);
-                            if (timeKeys.length > 0) {
-                                var groups = Object.keys(data.fact.data[timeKeys[0]]);
-                                groups.forEach(function(g) {
-                                    var opt = document.createElement('option');
-                                    opt.value = g;
-                                    opt.textContent = g.replace('GPV', '');
-                                    groupSelect.appendChild(opt);
-                                });
+
+                        Object.keys(groupsData).sort().forEach(function(groupName) {
+                            var option = document.createElement('option');
+                            option.value = groupName;
+                            option.textContent = groupName.replace('GPV', '');
+                            groupSelect.appendChild(option);
+                        });
+
+                        groupSelect.disabled = false;
+
+                        if (preferredGroup && groupsData[preferredGroup]) {
+                            groupSelect.value = preferredGroup;
+                            if (groupSelect.value) {
+                                activateSchedule();
                             }
                         }
-                        groupSelect.disabled = false;
                     })
-                    .catch(err => {
+                    .catch(function(error) {
                         groupSelect.innerHTML = '<option value="">Помилка завантаження</option>';
+                        resultDiv.textContent = error.message;
                     });
+            }
+
+            regionSelect.addEventListener('change', function() {
+                saveSelection();
+                loadRegion(this.value, '');
             });
 
-            document.getElementById('ua-show').addEventListener('click', function() {
-                var region = regionSelect.value;
+            groupSelect.addEventListener('change', function() {
+                saveSelection();
+            });
+
+            showButton.addEventListener('click', function() {
+                if (!regionSelect.value) {
+                    alert('Оберіть область.');
+                    return;
+                }
+
+                if (!groupSelect.value) {
+                    alert('Оберіть групу.');
+                    return;
+                }
+
+                if (!currentData) {
+                    alert('Дані ще завантажуються. Спробуйте трохи пізніше.');
+                    return;
+                }
+
+                saveSelection();
+
+                if ('Notification' in window && Notification.permission === 'default') {
+                    Notification.requestPermission().catch(function() {});
+                }
+
+                if (soundEl) {
+                    soundEl.play().then(function() {
+                        soundEl.pause();
+                        soundEl.currentTime = 0;
+                    }).catch(function() {});
+                }
+
+                activateSchedule();
+            });
+
+            function activateSchedule() {
+                var groupsData = getLatestData(currentData);
                 var group = groupSelect.value;
 
-                if (!region) { alert('Оберіть регіон'); return; }
-                if (!group) { alert('Оберіть групу'); return; }
-                if (!currentData) { alert('Дані ще не завантажені'); return; }
-
-                // Розблокування звуку (браузери вимагають кліку для відтворення)
-                if(soundEl) {
-                    soundEl.play().then(() => { soundEl.pause(); soundEl.currentTime = 0; }).catch(e => {});
+                if (!groupsData || !groupsData[group]) {
+                    resultDiv.textContent = 'Дані для цієї групи відсутні.';
+                    return;
                 }
 
+                activeRegion = regionSelect.value;
+                activeGroup = group;
+                currentGroupData = groupsData[group];
+
+                saveSelection();
+                renderSchedule(currentGroupData);
+
+                if (ticker) {
+                    clearInterval(ticker);
+                }
+
+                if (refreshTicker) {
+                    clearInterval(refreshTicker);
+                }
+
+                checkNextChange();
+                ticker = setInterval(checkNextChange, 1000);
+
+                refreshTicker = setInterval(function() {
+                    refreshScheduleData();
+                }, 300000);
+
+                loadAds(activeRegion, activeGroup);
+            }
+
+            function renderSchedule(groupData) {
                 resultDiv.innerHTML = '';
-                timerBox.style.display = 'none';
-                if(timerInterval) clearInterval(timerInterval);
-                
-                var timeKeys = Object.keys(currentData.fact.data);
-                if (timeKeys.length === 0) {
-                    resultDiv.innerHTML = '<p>Немає даних для цього регіону.</p>';
-                    return;
+
+                var updated = currentData.lastUpdated || '';
+                if (updated) {
+                    var updatedLine = document.createElement('p');
+                    updatedLine.textContent = 'Оновлено: ' + new Date(updated).toLocaleString('uk-UA');
+                    resultDiv.appendChild(updatedLine);
                 }
 
-                var latestTime = timeKeys[timeKeys.length - 1]; 
-                var groupData = currentData.fact.data[latestTime][group];
-
-                if (!groupData) {
-                    resultDiv.innerHTML = '<p>Дані для цієї групи відсутні.</p>';
-                    return;
-                }
-
-                var upd = currentData.lastUpdated || '—';
-                var updP = document.createElement('p');
-                updP.innerHTML = '<strong>Оновлено:</strong> ' + new Date(upd).toLocaleString('uk-UA');
-                resultDiv.appendChild(updP);
-
-                // Малюємо таблицю
                 var table = document.createElement('table');
-                table.style.width = '100%';
-                table.style.borderCollapse = 'collapse';
-                table.style.textAlign = 'center';
-                table.style.fontSize = '13px';
-
                 var thead = document.createElement('thead');
-                var trHead = document.createElement('tr');
-                trHead.innerHTML = '<th style="border:1px solid #ddd; padding:5px; background:#f5f5f5;">Година</th><th style="border:1px solid #ddd; padding:5px; background:#f5f5f5;">Статус</th>';
-                thead.appendChild(trHead);
+                var header = document.createElement('tr');
+
+                var hourHeader = document.createElement('th');
+                hourHeader.textContent = 'Година';
+
+                var statusHeader = document.createElement('th');
+                statusHeader.textContent = 'Статус';
+
+                header.appendChild(hourHeader);
+                header.appendChild(statusHeader);
+                thead.appendChild(header);
                 table.appendChild(thead);
 
                 var tbody = document.createElement('tbody');
-                
-                for (var h = 1; h <= 24; h++) {
-                    var status = groupData[h.toString()];
-                    var tr = document.createElement('tr');
-                    
-                    var tdHour = document.createElement('td');
-                    tdHour.style.border = '1px solid #ddd';
-                    tdHour.style.padding = '5px';
-                    tdHour.textContent = (h < 10 ? '0' : '') + h + ':00 - ' + (h < 10 ? '0' : '') + h + ':59';
-                    
-                    var tdStatus = document.createElement('td');
-                    tdStatus.style.border = '1px solid #ddd';
-                    tdStatus.style.padding = '5px';
-                    tdStatus.style.fontWeight = 'bold';
+
+                for (var key = 1; key <= 24; key++) {
+                    var status = groupData[String(key)];
+                    var startHour = key - 1;
+                    var endHour = key % 24;
+
+                    var row = document.createElement('tr');
+                    var hourCell = document.createElement('td');
+                    var statusCell = document.createElement('td');
+
+                    hourCell.textContent =
+                        String(startHour).padStart(2, '0') + ':00 — ' +
+                        String(endHour).padStart(2, '0') + ':00';
+
+                    statusCell.style.fontWeight = 'bold';
 
                     if (status === 'yes') {
-                        tdStatus.textContent = 'Світло є';
-                        tdStatus.style.backgroundColor = '#d4edda';
-                        tdStatus.style.color = '#155724';
+                        statusCell.textContent = 'Світло є';
+                        statusCell.style.backgroundColor = '#d4edda';
+                        statusCell.style.color = '#155724';
                     } else if (status === 'no') {
-                        tdStatus.textContent = 'Світла немає';
-                        tdStatus.style.backgroundColor = '#f8d7da';
-                        tdStatus.style.color = '#721c24';
+                        statusCell.textContent = 'Світла немає';
+                        statusCell.style.backgroundColor = '#f8d7da';
+                        statusCell.style.color = '#721c24';
                     } else {
-                        tdStatus.textContent = 'Перехід';
-                        tdStatus.style.backgroundColor = '#fff3cd';
-                        tdStatus.style.color = '#856404';
+                        statusCell.textContent = 'Перехід / немає даних';
+                        statusCell.style.backgroundColor = '#fff3cd';
+                        statusCell.style.color = '#856404';
                     }
 
-                    tr.appendChild(tdHour);
-                    tr.appendChild(tdStatus);
-                    tbody.appendChild(tr);
+                    row.appendChild(hourCell);
+                    row.appendChild(statusCell);
+                    tbody.appendChild(row);
                 }
+
                 table.appendChild(tbody);
                 resultDiv.appendChild(table);
+            }
 
-                // Логіка таймера
-                startTimer(groupData);
+            /*
+             * Ключі джерела:
+             * 1 = 00:00–01:00
+             * 2 = 01:00–02:00
+             * ...
+             * 21 = 20:00–21:00
+             *
+             * Тому при переході на 20:00 порівнюються
+             * ключі 20 та 21. Додатковий зсув не застосовується.
+             */
 
-                loadAds(region, group, adSlot);
-            });
+            function checkNextChange() {
+                if (!currentGroupData || !activeGroup) {
+                    return;
+                }
 
-            function startTimer(groupData) {
-                // Отримуємо поточний час за Києвом
                 var now = new Date();
-                // Якщо у вас інший часовий пояс, це можна змінити. Київ це UTC+2 або UTC+3.
-                // Для простоти беремо локальний час користувача.
-                
-                var currentHour = now.getHours(); 
-                var currentMinute = now.getMinutes();
+                var currentHour = now.getHours();
+                var currentKey = String(currentHour + 1);
+                var currentStatus = currentGroupData[currentKey];
 
-                // Шукаємо наступну зміну статусу
-                var nextChangeHour = -1;
-                var nextStatus = '';
-                var currentStatus = groupData[(currentHour + 1).toString()]; // поточна година (індекси 1-24)
+                if (!currentStatus || currentStatus === 'first' || currentStatus === 'second') {
+                    timerBox.style.display = 'block';
+                    timerText.textContent = 'Очікуємо актуальний графік.';
+                    return;
+                }
 
-                // Проходимось по годинах, починаючи з наступної
-                for (var i = 1; i <= 25; i++) {
-                    var checkHour = (currentHour + i) % 24;
-                    if (checkHour === 0) checkHour = 24; // Кінець дня
-                    
-                    var status = groupData[checkHour.toString()];
-                    if (status && status !== currentStatus && status !== 'first' && status !== 'second') {
-                        nextChangeHour = checkHour;
-                        nextStatus = status;
+                var nextEvent = null;
+
+                for (var offset = 1; offset <= 24; offset++) {
+                    var nextHour = (currentHour + offset) % 24;
+                    var nextKey = String(nextHour + 1);
+                    var nextStatus = currentGroupData[nextKey];
+
+                    if (!nextStatus || nextStatus === 'first' || nextStatus === 'second') {
+                        continue;
+                    }
+
+                    if (nextStatus !== currentStatus) {
+                        var target = new Date(now);
+                        target.setHours(currentHour + offset, 0, 0, 0);
+
+                        nextEvent = {
+                            time: target,
+                            status: nextStatus,
+                            key: activeRegion + '_' + activeGroup + '_' + target.getFullYear() + '_' +
+                                target.getMonth() + '_' + target.getDate() + '_' + target.getHours()
+                        };
                         break;
                     }
                 }
 
-                if (nextChangeHour === -1) {
-                    timerText.textContent = "Змін не знайдено";
+                if (!nextEvent) {
                     timerBox.style.display = 'block';
+                    timerText.textContent = 'Наступних змін у графіку не знайдено.';
                     return;
                 }
 
-                // Обчислюємо час до наступної зміни
-                var targetTime = new Date();
-                targetTime.setHours(nextChangeHour - 1, 0, 0, 0); // Початок години
-                
-                if (targetTime < now) {
-                    targetTime.setDate(targetTime.getDate() + 1);
-                }
+                var diff = nextEvent.time.getTime() - now.getTime();
+                var secondsLeft = Math.max(0, Math.floor(diff / 1000));
+                var minutesLeft = Math.floor(secondsLeft / 60);
+                var seconds = secondsLeft % 60;
 
-                var diffMs = targetTime - now;
-                var diffMins = Math.floor(diffMs / 60000);
+                var eventText = nextEvent.status === 'yes'
+                    ? 'Світло з’явиться'
+                    : 'Світло зникне';
 
-                // Показуємо таймер тільки якщо залишилось менше noticeMinutes
-                if (diffMins <= noticeMinutes && diffMins >= 0) {
-                    timerBox.style.display = 'block';
-                    var statusText = nextStatus === 'yes' ? 'Світло з\'явиться' : 'Світло зникне';
-                    
-                    timerInterval = setInterval(function() {
-                        var now2 = new Date();
-                        var diff2 = targetTime - now2;
-                        
-                        if (diff2 <= 0) {
-                            clearInterval(timerInterval);
-                            timerText.textContent = "Час настав!";
-                            
-                            // Відтворюємо звук
-                            if(soundEl && soundEl.src) {
-                                soundEl.play().catch(e => console.log('Помилка звуку:', e));
-                            }
-                            
-                            // Вібрація
-                            if(navigator.vibrate) {
-                                navigator.vibrate([500, 200, 500]);
-                            }
+                timerBox.style.display = 'block';
 
-                            // Попап
-                            alert('Увага! ' + statusText + '!');
-                            
-                            // Оновлюємо таймер
-                            setTimeout(() => {
-                                startTimer(groupData);
-                            }, 1000);
-                            
-                            return;
-                        }
+                if (minutesLeft <= noticeMinutes) {
+                    timerText.textContent = eventText + ' через ' +
+                        minutesLeft + ' хв ' + String(seconds).padStart(2, '0') + ' сек';
 
-                        var mins = Math.floor(diff2 / 60000);
-                        var secs = Math.floor((diff2 % 60000) / 1000);
-                        timerText.innerHTML = statusText + ' через <br>' + mins + ' хв ' + (secs < 10 ? '0' : '') + secs + ' сек';
-                    }, 1000);
-                } else {
-                    timerBox.style.display = 'block';
-                    timerText.textContent = 'Наступна зміна о ' + (nextChangeHour < 10 ? '0' : '') + nextChangeHour + ':00. Таймер увімкнеться за ' + noticeMinutes + ' хв.';
-                }
-            }
-
-            function loadAds(region, group, container) {
-                var xhr = new XMLHttpRequest();
-                xhr.open('POST', '<?php echo admin_url('admin-ajax.php'); ?>');
-                xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
-                xhr.onload = function() {
-                    if (xhr.status === 200) {
-                        container.innerHTML = xhr.responseText;
-                        if (xhr.responseText.indexOf('ua-ad-item') !== -1) {
-                            var trackXhr = new XMLHttpRequest();
-                            trackXhr.open('POST', '<?php echo admin_url('admin-ajax.php'); ?>');
-                            trackXhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
-                            trackXhr.send('action=ua_track_ad&type=impression&region=' + encodeURIComponent(region) + '&group=' + encodeURIComponent(group));
-                        }
+                    if (!alertedEvents[nextEvent.key]) {
+                        alertedEvents[nextEvent.key] = true;
+                        sendActivePageAlert(eventText, nextEvent);
                     }
-                };
-                xhr.send('action=ua_get_ads&region=' + encodeURIComponent(region) + '&group=' + encodeURIComponent(group));
+                } else {
+                    var hh = String(nextEvent.time.getHours()).padStart(2, '0');
+                    timerText.textContent = 'Наступна зміна о ' + hh + ':00. Попередження за ' +
+                        noticeMinutes + ' хвилин.';
+                }
+
+                if (diff <= 0) {
+                    timerText.textContent = 'Час зміни статусу настав. Оновлюємо графік...';
+                    refreshScheduleData();
+                }
             }
-        });
+
+            function sendActivePageAlert(message, event) {
+                noticeBox.style.display = 'block';
+                noticeBox.textContent = '🔔 Увага! ' + message + '!';
+
+                if (soundEl && soundEl.querySelector('source')) {
+                    soundEl.currentTime = 0;
+                    soundEl.play().catch(function() {});
+                }
+
+                if (navigator.vibrate) {
+                    navigator.vibrate([500, 200, 500]);
+                }
+
+                if ('Notification' in window && Notification.permission === 'granted') {
+                    try {
+                        var notification = new Notification('UA Light Alert', {
+                            body: message + ' о ' +
+                                String(event.time.getHours()).padStart(2, '0') + ':00',
+                            icon: '<?php echo esc_js(get_site_icon_url(192)); ?>',
+                            tag: event.key
+                        });
+
+                        notification.onclick = function() {
+                            window.focus();
+                            notification.close();
+                        };
+                    } catch (e) {}
+                }
+            }
+
+            function refreshScheduleData() {
+                if (!activeRegion || !activeGroup) {
+                    return;
+                }
+
+                var url = 'https://raw.githubusercontent.com/Baskerville42/outage-data-ua/main/data/'
+                    + encodeURIComponent(activeRegion) + '.json';
+
+                fetch(url, {cache: 'no-store'})
+                    .then(function(response) {
+                        if (!response.ok) {
+                            throw new Error('Помилка оновлення');
+                        }
+                        return response.json();
+                    })
+                    .then(function(data) {
+                        currentData = data;
+                        var groups = getLatestData(data);
+
+                        if (groups && groups[activeGroup]) {
+                            currentGroupData = groups[activeGroup];
+                            renderSchedule(currentGroupData);
+                        }
+                    })
+                    .catch(function() {});
+            }
+
+            function loadAds(region, group) {
+                var body = new URLSearchParams();
+                body.append('action', 'ua_get_ads');
+                body.append('region', region);
+                body.append('group', group);
+                body.append('_ajax_nonce', ajaxNonce);
+
+                fetch(ajaxUrl, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                    body: body.toString()
+                })
+                .then(function(response) {
+                    return response.text();
+                })
+                .then(function(html) {
+                    adSlot.innerHTML = html;
+
+                    if (html.indexOf('ua-ad-item') !== -1) {
+                        trackAd('impression', region, group);
+                    }
+                })
+                .catch(function() {
+                    adSlot.innerHTML = '';
+                });
+            }
+
+            function trackAd(type, region, group) {
+                var body = new URLSearchParams();
+                body.append('action', 'ua_track_ad');
+                body.append('type', type);
+                body.append('region', region);
+                body.append('group', group);
+                body.append('_ajax_nonce', ajaxNonce);
+
+                fetch(ajaxUrl, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                    body: body.toString()
+                }).catch(function() {});
+            }
+
+            window.uaLightTrackClick = function(region, group) {
+                trackAd('click', region, group);
+            };
+
+            readSelection();
+        })();
         </script>
         <?php
+
         return ob_get_clean();
     }
 
-    /* ---------- AJAX ---------- */
+    /* ---------------------------------------------------------
+     * AJAX: AD STATISTICS
+     * ------------------------------------------------------ */
 
     public function track_ad_click() {
-        $type = sanitize_text_field($_POST['type'] ?? '');
-        $region = sanitize_text_field($_POST['region'] ?? '');
-        $group  = sanitize_text_field($_POST['group'] ?? '');
+        $type = sanitize_text_field(wp_unslash($_POST['type'] ?? ''));
+        $region = sanitize_text_field(wp_unslash($_POST['region'] ?? ''));
+        $group = sanitize_text_field(wp_unslash($_POST['group'] ?? ''));
+
         $ads = get_option($this->option_key, []);
-        
+        if (!is_array($ads)) {
+            $ads = [];
+        }
+
         foreach ($ads as $i => $ad) {
-            if (!empty($ad['region']) && $ad['region'] !== $region) continue;
-            if (!empty($ad['group']) && $ad['group'] !== $group) continue;
+            if (!empty($ad['region']) && $ad['region'] !== $region) {
+                continue;
+            }
+
+            if (!empty($ad['group']) && $ad['group'] !== $group) {
+                continue;
+            }
 
             if ($type === 'impression') {
-                $ads[$i]['impressions'] = ($ad['impressions'] ?? 0) + 1;
+                $ads[$i]['impressions'] = absint($ad['impressions'] ?? 0) + 1;
             } elseif ($type === 'click') {
-                $ads[$i]['clicks'] = ($ad['clicks'] ?? 0) + 1;
+                $ads[$i]['clicks'] = absint($ad['clicks'] ?? 0) + 1;
             }
         }
+
         update_option($this->option_key, $ads);
         wp_die();
     }
 }
 
-new UA_Light_Alert();
-
-/* AJAX для отримання реклами */
-add_action('wp_ajax_ua_get_ads', 'ua_light_get_ads');
-add_action('wp_ajax_nopriv_ua_get_ads', 'ua_light_get_ads');
+/* -------------------------------------------------------------
+ * AJAX: GET ADVERTISEMENTS
+ * ---------------------------------------------------------- */
 
 function ua_light_get_ads() {
-    $region = sanitize_text_field($_POST['region'] ?? '');
-    $group  = sanitize_text_field($_POST['group'] ?? '');
-    $ads    = get_option('ua_light_ads', []);
-    $output = '';
-    $today  = date('Y-m-d');
+    $region = sanitize_text_field(wp_unslash($_POST['region'] ?? ''));
+    $group = sanitize_text_field(wp_unslash($_POST['group'] ?? ''));
 
-    foreach ($ads as $ad) {
-        if (!empty($ad['region']) && $ad['region'] !== $region) continue;
-        if (!empty($ad['group']) && $ad['group'] !== $group) continue;
-        if (!empty($ad['period_start']) && $today < $ad['period_start']) continue;
-        if (!empty($ad['period_end']) && $today > $ad['period_end']) continue;
-
-        $output .= '<div class="ua-ad-item" style="border:1px solid #ddd;padding:10px;margin-bottom:10px;cursor:pointer;" 
-                         onclick="trackClick(\'' . esc_js($region) . '\', \'' . esc_js($group) . '\')">'
-                 . $ad['html']
-                 . '</div>';
+    $ads = get_option('ua_light_ads', []);
+    if (!is_array($ads)) {
+        $ads = [];
     }
 
-    if ($output) {
-        $output .= '<script>
-            function trackClick(region, group) {
-                var xhr = new XMLHttpRequest();
-                xhr.open("POST", "' . admin_url('admin-ajax.php') . '");
-                xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
-                xhr.send("action=ua_track_ad&type=click&region=" + encodeURIComponent(region) + "&group=" + encodeURIComponent(group));
-            }
-        </script>';
-    } else {
+    $today = current_time('Y-m-d');
+    $output = '';
+
+    foreach ($ads as $ad) {
+        if (!empty($ad['region']) && $ad['region'] !== $region) {
+            continue;
+        }
+
+        if (!empty($ad['group']) && $ad['group'] !== $group) {
+            continue;
+        }
+
+        if (!empty($ad['period_start']) && $today < $ad['period_start']) {
+            continue;
+        }
+
+        if (!empty($ad['period_end']) && $today > $ad['period_end']) {
+            continue;
+        }
+
+        $output .= '<div class="ua-ad-item" style="border:1px solid #ddd;padding:10px;margin-bottom:10px;">';
+        $output .= wp_kses_post($ad['html'] ?? '');
+        $output .= '</div>';
+    }
+
+    if (!$output) {
         $output = '<p><em>Реклами для цього запиту немає.</em></p>';
     }
 
     echo $output;
     wp_die();
 }
+
+new UA_Light_Alert();

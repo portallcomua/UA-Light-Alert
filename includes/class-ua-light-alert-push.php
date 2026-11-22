@@ -105,9 +105,15 @@ final class UA_Light_Alert_Push {
         $group = isset($body['group']) ? sanitize_text_field($body['group']) : '';
         $pageUrl = isset($body['page_url']) ? esc_url_raw($body['page_url']) : home_url('/');
 
+        $endpointHost = strtolower((string) wp_parse_url($endpoint, PHP_URL_HOST));
+        $decodedPublic = self::base64url_decode($p256dh);
+        $decodedAuth = self::base64url_decode($auth);
         if (!$endpoint || 'https' !== wp_parse_url($endpoint, PHP_URL_SCHEME)
-            || !$p256dh || !$auth || !$region || !$group) {
-            return new WP_Error('ua_light_invalid_subscription', 'Некоректні дані підписки.', ['status' => 400]);
+            || !$this->is_allowed_push_host($endpointHost)
+            || !is_string($decodedPublic) || strlen($decodedPublic) !== 65 || $decodedPublic[0] !== "\x04"
+            || !is_string($decodedAuth) || strlen($decodedAuth) !== 16
+            || !$region || !$group) {
+            return new WP_Error('ua_light_invalid_subscription', 'Некоректні дані push-підписки.', ['status' => 400]);
         }
         if (wp_parse_url($pageUrl, PHP_URL_HOST) !== wp_parse_url(home_url('/'), PHP_URL_HOST)) {
             $pageUrl = home_url('/');
@@ -255,7 +261,23 @@ final class UA_Light_Alert_Push {
         return false;
     }
 
+    private function is_allowed_push_host($host) {
+        if (in_array($host, ['fcm.googleapis.com', 'web.push.apple.com'], true)) {
+            return true;
+        }
+        foreach (['.push.services.mozilla.com', '.notify.windows.com'] as $suffix) {
+            if (strlen($host) > strlen($suffix) && substr($host, -strlen($suffix)) === $suffix) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private function send_web_push($subscription, $payload) {
+        $endpointHost = strtolower((string) wp_parse_url($subscription['endpoint'], PHP_URL_HOST));
+        if (!$this->is_allowed_push_host($endpointHost)) {
+            return false;
+        }
         $keys = self::get_vapid_keys();
         if (!$keys) {
             return false;

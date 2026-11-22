@@ -26,3 +26,17 @@ jobs:
           node-version: '20'
       - name: Service worker JavaScript syntax check
         run: node --check assets/ua-light-alert-sw.js
+
+      - name: Build installable plugin ZIP
+        run: |
+          mkdir -p dist/ua-light-alert
+          rsync -a --exclude='.git' --exclude='.github' --exclude='dist' ./ dist/ua-light-alert/
+          cd dist
+          zip -qr ua-light-alert-4.2.1.zip ua-light-alert
+      - name: Upload installable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: ua-light-alert-4.2.1-installable
+          path: dist/ua-light-alert-4.2.1.zip
+          if-no-files-found: error
+          retention-days: 30

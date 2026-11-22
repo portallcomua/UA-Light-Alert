@@ -115,6 +115,10 @@ final class UA_Light_Alert {
             'sound_on_url'   => '',
             'voice_enabled'  => 1,
             'voice_volume'   => 80,
+            'sound_volume'   => 80,
+            'alert_repeat'   => 0,
+            'quiet_start'    => '',
+            'quiet_end'      => '',
         ];
     }
 
@@ -178,12 +182,23 @@ final class UA_Light_Alert {
             }
             $voice_volume = isset($_POST['voice_volume']) ? absint($_POST['voice_volume']) : 80;
             $voice_volume = min(100, $voice_volume);
+            $sound_volume = isset($_POST['sound_volume']) ? min(100, absint($_POST['sound_volume'])) : 80;
+            $alert_repeat = isset($_POST['alert_repeat']) ? absint($_POST['alert_repeat']) : 0;
+            $alert_repeat = min(2, $alert_repeat);
+            $quiet_start = sanitize_text_field(wp_unslash($_POST['quiet_start'] ?? ''));
+            $quiet_end = sanitize_text_field(wp_unslash($_POST['quiet_end'] ?? ''));
+            if (!preg_match('/^(?:[01]\d|2[0-3]):[0-5]\d$/', $quiet_start)) $quiet_start = '';
+            if (!preg_match('/^(?:[01]\d|2[0-3]):[0-5]\d$/', $quiet_end)) $quiet_end = '';
             $settings = [
                 'notice_minutes' => $notice_minutes,
                 'sound_off_url'  => esc_url_raw(wp_unslash($_POST['sound_off_url'] ?? '')),
                 'sound_on_url'   => esc_url_raw(wp_unslash($_POST['sound_on_url'] ?? '')),
                 'voice_enabled'  => isset($_POST['voice_enabled']) ? 1 : 0,
                 'voice_volume'   => $voice_volume,
+                'sound_volume'   => $sound_volume,
+                'alert_repeat'   => $alert_repeat,
+                'quiet_start'    => $quiet_start,
+                'quiet_end'      => $quiet_end,
             ];
 
             update_option($this->settings_key, $settings);
@@ -350,6 +365,18 @@ final class UA_Light_Alert {
                             <output><?php echo esc_html((int) $settings['voice_volume']); ?>%</output>
                         </td>
                     </tr>
+                    <tr>
+                        <th scope="row">Гучність звукового сигналу</th>
+                        <td><input type="range" name="sound_volume" min="0" max="100" step="5" value="<?php echo esc_attr((int) $settings['sound_volume']); ?>" oninput="this.nextElementSibling.value=this.value+'%'"> <output><?php echo esc_html((int) $settings['sound_volume']); ?>%</output></td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Повтор попередження</th>
+                        <td><select name="alert_repeat"><option value="0" <?php selected((int) $settings['alert_repeat'], 0); ?>>Без повтору</option><option value="1" <?php selected((int) $settings['alert_repeat'], 1); ?>>Повторити 1 раз</option><option value="2" <?php selected((int) $settings['alert_repeat'], 2); ?>>Повторити 2 рази</option></select></td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Тихі години</th>
+                        <td><label>З <input type="time" name="quiet_start" value="<?php echo esc_attr($settings['quiet_start']); ?>"></label> <label>до <input type="time" name="quiet_end" value="<?php echo esc_attr($settings['quiet_end']); ?>"></label><p class="description">У цей проміжок плагін не відтворює звуки, голос і не показує активні сповіщення. Залиште обидва поля порожніми, щоб вимкнути тихі години. Працює і через північ.</p></td>
+                    </tr>
                     </table>
                     <script>
                     jQuery(function($) {
@@ -373,6 +400,7 @@ final class UA_Light_Alert {
                             var url = $('#' + $(this).data('target')).val();
                             if (!url) { window.alert('Спочатку оберіть або вкажіть MP3.'); return; }
                             var audio = new Audio(url);
+                            audio.volume = <?php echo max(0, min(100, (int) $settings['sound_volume'])) / 100; ?>;
                             audio.play().catch(function() { window.alert('Браузер не дозволив відтворити файл. Перевірте посилання.'); });
                         });
                     });
@@ -732,6 +760,10 @@ final class UA_Light_Alert {
             var noticeMinutes = <?php echo (int) $notice_minutes; ?>;
             var voiceEnabled = <?php echo !empty($settings['voice_enabled']) ? 'true' : 'false'; ?>;
             var voiceVolume = <?php echo max(0, min(100, (int) $settings['voice_volume'])) / 100; ?>;
+            var soundVolume = <?php echo max(0, min(100, (int) $settings['sound_volume'])) / 100; ?>;
+            var alertRepeat = <?php echo max(0, min(2, (int) $settings['alert_repeat'])); ?>;
+            var quietStart = <?php echo wp_json_encode($settings['quiet_start']); ?>;
+            var quietEnd = <?php echo wp_json_encode($settings['quiet_end']); ?>;
             var soundUrls = {
                 off: <?php echo wp_json_encode($sound_off_url); ?>,
                 on: <?php echo wp_json_encode($sound_on_url); ?>
@@ -1146,14 +1178,37 @@ final class UA_Light_Alert {
                 });
             }
 
+            function isQuietHoursNow() {
+                if (!quietStart || !quietEnd || quietStart === quietEnd) return false;
+                var now = new Date();
+                var current = now.getHours() * 60 + now.getMinutes();
+                var startParts = quietStart.split(':');
+                var endParts = quietEnd.split(':');
+                var start = parseInt(startParts[0], 10) * 60 + parseInt(startParts[1], 10);
+                var end = parseInt(endParts[0], 10) * 60 + parseInt(endParts[1], 10);
+                return start < end ? (current >= start && current < end) : (current >= start || current < end);
+            }
+
             function sendActivePageAlert(message, event) {
                 noticeBox.style.display = 'block';
                 noticeBox.textContent = '🔔 Увага! ' + message + '!';
+                if (isQuietHoursNow()) return;
 
                 var soundUrl = event.status === 'yes' ? soundUrls.on : soundUrls.off;
                 if (soundEl && soundUrl) {
                     soundEl.pause();
                     soundEl.src = soundUrl;
+                    soundEl.volume = soundVolume;
+                    var remainingPlays = alertRepeat + 1;
+                    soundEl.onended = function() {
+                        remainingPlays--;
+                        if (remainingPlays > 0) {
+                            soundEl.currentTime = 0;
+                            soundEl.play().catch(function() {});
+                        } else {
+                            soundEl.onended = null;
+                        }
+                    };
                     soundEl.currentTime = 0;
                     soundEl.play().catch(function() {});
                 }
@@ -1166,6 +1221,17 @@ final class UA_Light_Alert {
                             String(event.time.getMinutes()).padStart(2, '0') + '.');
                         spoken.lang = 'uk-UA';
                         spoken.volume = voiceVolume;
+                        var speakRemaining = alertRepeat + 1;
+                        spoken.onend = function() {
+                            speakRemaining--;
+                            if (speakRemaining > 0 && !isQuietHoursNow()) {
+                                var repeated = new SpeechSynthesisUtterance(spoken.text);
+                                repeated.lang = 'uk-UA';
+                                repeated.volume = voiceVolume;
+                                repeated.onend = spoken.onend;
+                                window.speechSynthesis.speak(repeated);
+                            }
+                        };
                         window.speechSynthesis.speak(spoken);
                     } catch (e) {}
                 }

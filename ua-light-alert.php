@@ -245,6 +245,7 @@ final class UA_Light_Alert {
     public function render_admin_page() {
         wp_enqueue_media();
         $push_count = UA_Light_Alert_Push::get_subscription_count();
+        $cron_status = UA_Light_Alert_Push::get_cron_status();
         $ads = get_option($this->option_key, []);
         if (!is_array($ads)) {
             $ads = [];
@@ -259,8 +260,25 @@ final class UA_Light_Alert {
             <h1>Графік світла — Налаштування та рекламодавці</h1>
             <div class="notice notice-info">
                 <p><strong>Фонові сповіщення:</strong> активних push-підписок — <?php echo absint($push_count); ?>.
-                Після дозволу браузера сповіщення надходитимуть і коли сторінка закрита, якщо сайт працює через HTTPS та серверний WP-Cron виконується щохвилини.
-                Коли сторінка закрита, звук визначається налаштуваннями сповіщень пристрою; довільний MP3 браузер не може примусово програвати у фоні.</p>
+                Плагін сам створює щохвилинне завдання WordPress — окремо налаштовувати його в адмінці не потрібно.</p>
+                <p><strong>Стан планувальника:</strong>
+                    <?php if ($cron_status['scheduled']) : ?>
+                        завдання заплановано<?php if ($cron_status['next_run']) : ?>, наступний запуск: <?php echo esc_html(wp_date('d.m.Y H:i:s', $cron_status['next_run'])); ?><?php endif; ?>.
+                    <?php else : ?>
+                        <span style="color:#b32d2e;">завдання не заплановане</span>.
+                    <?php endif; ?>
+                    <?php if ($cron_status['last_run']) : ?>
+                        Остання перевірка: <?php echo esc_html(wp_date('d.m.Y H:i:s', $cron_status['last_run'])); ?>.
+                    <?php else : ?>
+                        Перевірка ще не запускалася.
+                    <?php endif; ?>
+                </p>
+                <?php if ($cron_status['wp_cron_disabled']) : ?>
+                    <p style="color:#b32d2e;"><strong>Увага:</strong> на сайті вимкнено WP-Cron (DISABLE_WP_CRON). Плагін не може самостійно запускати серверні завдання в такому режимі.</p>
+                <?php elseif ($cron_status['last_run'] && time() - $cron_status['last_run'] > 300) : ?>
+                    <p style="color:#b32d2e;"><strong>Увага:</strong> WordPress не запускав фонову перевірку понад 5 хвилин. Відправлення push може затримуватися, якщо на сайті немає відвідувачів.</p>
+                <?php endif; ?>
+                <p>Коли сторінка закрита, звук push-сповіщення визначає операційна система; довільний MP3 примусово програвати у фоні браузер не дозволяє.</p>
             </div>
 
             <?php if (isset($_GET['msg'])) : ?>
@@ -1525,5 +1543,6 @@ final class UA_Light_Alert_GitHub_Updater {
 new UA_Light_Alert();
 new UA_Light_Alert_GitHub_Updater();
 new UA_Light_Alert_Push();
+register_activation_hook(__FILE__, ['UA_Light_Alert_Push', 'activate']);
 register_deactivation_hook(__FILE__, ['UA_Light_Alert_Push', 'deactivate']);
 

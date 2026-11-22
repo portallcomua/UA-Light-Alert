@@ -196,7 +196,7 @@ final class UA_Light_Alert_Push {
                 'title' => 'Графік світла',
                 'body' => $message . ' о ' . $event['time']->format('H:i') . '.',
                 'url' => !empty($subscription['page_url']) ? $subscription['page_url'] : home_url('/'),
-                'tag' => 'ua-light-' . md5($eventKey),
+                'tag' => $eventKey,
                 'vibrate' => [500, 200, 500],
             ];
             $sent = $this->send_web_push($subscription, $payload);

@@ -208,7 +208,7 @@ final class UA_Light_Alert_Push {
             if ($seconds < 0 || $seconds > ($lead * 60)) {
                 continue;
             }
-            $eventKey = $subscription['region'] . '|' . $group . '|' . $event['time']->format('Y-m-d-H');
+            $eventKey = $subscription['region'] . '|' . $group . '|' . $event['time']->format('Y-m-d-H-i');
             if (!empty($subscription['last_event']) && hash_equals((string) $subscription['last_event'], $eventKey)) {
                 continue;
             }

@@ -13,7 +13,7 @@ WordPress plugin for electricity outage schedules, advertiser management, and ad
 
 In **UA Light Alert → Налаштування сповіщень**:
 
-- Select an alert lead time of 1, 5, or 10 minutes.
+- Select an alert lead time of 1, 5, or 10 minutes; the timer triggers at the selected threshold, not at a rounded-up minute.
 - Set a separate MP3 for the upcoming outage and for power restoration.
 - Choose an audio file from the WordPress Media Library (including a file uploaded from a computer or phone), or paste a direct MP3 URL.
 - Preview each configured sound.

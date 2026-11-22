@@ -1078,6 +1078,8 @@ final class UA_Light_Alert {
                         if (!response.ok) {
                             throw new Error('Не вдалося зберегти push-підписку.');
                         }
+                        noticeBox.style.display = 'block';
+                        noticeBox.textContent = 'Сповіщення для вибраної області та групи увімкнено.';
                         return subscription;
                     });
                 }).catch(function(error) {
@@ -1114,7 +1116,7 @@ final class UA_Light_Alert {
                                 body: body,
                                 icon: '<?php echo esc_js(get_site_icon_url(192)); ?>',
                                 tag: event.key,
-                                renotify: true,
+                                renotify: false,
                                 data: {url: window.location.href}
                             }).catch(function() {});
                         } else {

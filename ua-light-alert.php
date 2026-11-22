@@ -335,6 +335,21 @@ final class UA_Light_Alert {
                                 <p class="description">Звук, який відтворюється перед відновленням електропостачання.</p>
                             </td>
                         </tr>
+                    
+                    <tr>
+                        <th scope="row">Голосові повідомлення</th>
+                        <td>
+                            <label><input type="checkbox" name="voice_enabled" value="1" <?php checked(!empty($settings['voice_enabled'])); ?>> Озвучувати попередження українською мовою, коли сторінка відкрита</label>
+                            <p class="description">Використовує синтез мовлення браузера. Наявність українського голосу залежить від пристрою та браузера.</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Гучність голосу</th>
+                        <td>
+                            <input type="range" name="voice_volume" min="0" max="100" step="5" value="<?php echo esc_attr((int) $settings['voice_volume']); ?>" oninput="this.nextElementSibling.value=this.value+'%'">
+                            <output><?php echo esc_html((int) $settings['voice_volume']); ?>%</output>
+                        </td>
+                    </tr>
                     </table>
                     <script>
                     jQuery(function($) {
@@ -363,20 +378,6 @@ final class UA_Light_Alert {
                     });
                     </script>
 
-                    <tr>
-                        <th scope="row">Голосові повідомлення</th>
-                        <td>
-                            <label><input type="checkbox" name="voice_enabled" value="1" <?php checked(!empty($settings['voice_enabled'])); ?>> Озвучувати попередження українською мовою, коли сторінка відкрита</label>
-                            <p class="description">Використовує синтез мовлення браузера. Доступність українського голосу залежить від пристрою та браузера.</p>
-                        </td>
-                    </tr>
-                    <tr>
-                        <th scope="row">Гучність голосу</th>
-                        <td>
-                            <input type="range" name="voice_volume" min="0" max="100" step="5" value="<?php echo esc_attr((int) $settings['voice_volume']); ?>" oninput="this.nextElementSibling.value=this.value+'%'">
-                            <output><?php echo esc_html((int) $settings['voice_volume']); ?>%</output>
-                        </td>
-                    </tr>
                     <?php submit_button('Зберегти налаштування', 'primary', 'ua_save_settings'); ?>
                 </form>
             </div>

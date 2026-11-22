@@ -39,7 +39,7 @@ final class UA_Light_Alert_Push {
 
     public static function activate() {
         if (!wp_next_scheduled(self::CRON_HOOK)) {
-            wp_schedule_event(time() + 30, 'ua_light_minute', 'ua_light_minute');
+            wp_schedule_event(time() + 30, 'ua_light_minute', self::CRON_HOOK);
         }
     }
 
@@ -179,6 +179,7 @@ final class UA_Light_Alert_Push {
         }
         $subscriptions = get_option(self::SUBS_OPTION, []);
         if (!is_array($subscriptions) || !$subscriptions) {
+            update_option(self::LAST_STATUS_OPTION, 'no_subscriptions', false);
             return;
         }
         $settings = get_option('ua_light_settings', []);

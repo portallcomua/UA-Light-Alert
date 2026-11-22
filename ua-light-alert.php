@@ -2,7 +2,7 @@
 /**
  * Plugin Name: UA Light Alert
  * Description: Графіки відключень, CRM рекламодавців та сповіщення про зміни електропостачання.
- * Version: 4.5.1
+ * Version: 4.5.2
  * Plugin URI: https://uaserver.pp.ua/svitlo/
  * Update URI: https://github.com/portallcomua/UA-Light-Alert
  * Author: UAServer
@@ -735,6 +735,14 @@ final class UA_Light_Alert {
                     Показати графік та увімкнути сповіщення
                 </button>
 
+                <div class="ua-pwa-install-wrap">
+                    <button type="button" id="ua-pwa-install" class="ua-pwa-install" aria-label="Встановити додаток Графік відключень">
+                        <span class="ua-pwa-install-icon" aria-hidden="true">⬇</span>
+                        Встановити додаток Графік відключень
+                    </button>
+                    <p id="ua-pwa-install-help" class="ua-pwa-install-help" hidden></p>
+                </div>
+
                 <p class="ua-help">
                     Ваш вибір області та групи збережеться на цьому пристрої.
                     Його можна змінити в будь-який момент.
@@ -763,6 +771,28 @@ final class UA_Light_Alert {
                 font-family: Arial, sans-serif;
             }
             .ua-light-widget * { box-sizing: border-box; }
+            .ua-pwa-install-wrap { margin: 14px 0 4px; }
+            .ua-light-widget .ua-pwa-install {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                gap: 9px;
+                width: 100%;
+                max-width: 420px;
+                min-height: 48px;
+                padding: 12px 18px;
+                border: 0;
+                border-radius: 8px;
+                background: #ff6b00;
+                color: #fff;
+                font-size: 16px;
+                font-weight: 700;
+                cursor: pointer;
+            }
+            .ua-light-widget .ua-pwa-install:hover { background: #e85f00; }
+            .ua-light-widget .ua-pwa-install:focus-visible { outline: 3px solid #222; outline-offset: 3px; }
+            .ua-pwa-install-icon { font-size: 20px; line-height: 1; }
+            .ua-pwa-install-help { margin: 9px 0 0; font-size: 14px; line-height: 1.5; }
             .ua-field {
                 display: block;
                 margin-bottom: 14px;
@@ -925,6 +955,69 @@ final class UA_Light_Alert {
             var ajaxNonce = <?php echo wp_json_encode($nonce); ?>;
             var vapidPublicKey = <?php echo wp_json_encode($push_public_key); ?>;
             var pushSubscribeUrl = <?php echo wp_json_encode($push_subscribe_url); ?>;
+            var installButton = document.getElementById('ua-pwa-install');
+            var installHelp = document.getElementById('ua-pwa-install-help');
+            var deferredInstallPrompt = null;
+
+            function isPwaInstalled() {
+                return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)
+                    || window.navigator.standalone === true;
+            }
+
+            function hideInstallButton() {
+                if (installButton) installButton.style.display = 'none';
+                if (installHelp) installHelp.hidden = true;
+            }
+
+            function showInstallHelp(message) {
+                if (!installHelp) return;
+                installHelp.textContent = message;
+                installHelp.hidden = false;
+            }
+
+            if (isPwaInstalled()) {
+                hideInstallButton();
+            } else {
+                window.addEventListener('beforeinstallprompt', function(event) {
+                    event.preventDefault();
+                    deferredInstallPrompt = event;
+                    if (installButton) installButton.style.display = 'inline-flex';
+                });
+
+                window.addEventListener('appinstalled', function() {
+                    deferredInstallPrompt = null;
+                    hideInstallButton();
+                });
+
+                if (installButton) {
+                    installButton.addEventListener('click', function() {
+                        if (isPwaInstalled()) {
+                            hideInstallButton();
+                            return;
+                        }
+
+                        if (deferredInstallPrompt) {
+                            var promptEvent = deferredInstallPrompt;
+                            deferredInstallPrompt = null;
+                            promptEvent.prompt();
+                            promptEvent.userChoice.then(function(choice) {
+                                if (choice && choice.outcome === 'accepted') {
+                                    hideInstallButton();
+                                }
+                            }).catch(function() {});
+                            return;
+                        }
+
+                        var ua = window.navigator.userAgent || '';
+                        var isIos = /iphone|ipad|ipod/i.test(ua);
+                        if (isIos) {
+                            showInstallHelp('Щоб встановити додаток на iPhone: натисніть «Поділитися» у Safari, потім «На початковий екран» і «Додати».');
+                        } else {
+                            showInstallHelp('Браузер поки не надав команду швидкого встановлення. Відкрийте меню браузера та виберіть «Встановити додаток» або «Додати на головний екран».');
+                        }
+                    });
+                }
+            }
 
             var storageKey = 'ua_light_alert_selection_v1';
             var alertedEvents = {};
@@ -1512,6 +1605,9 @@ final class UA_Light_Alert {
                 trackAd('click', region, group);
             };
 
+            // Register the worker as soon as the schedule page loads, so the browser can
+            // evaluate PWA installability before the visitor presses the install button.
+            registerPwaServiceWorker();
             readSelection();
         })();
         </script>

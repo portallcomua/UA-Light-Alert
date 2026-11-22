@@ -2,7 +2,7 @@
 /**
  * Plugin Name: UA Light Alert
  * Description: Графіки відключень, CRM рекламодавців та сповіщення про зміни електропостачання.
- * Version: 4.1.0
+ * Version: 4.2.0
  * Author: UA Tools
  * Text Domain: ua-light-alert
  */
@@ -21,6 +21,8 @@ final class UA_Light_Alert {
 
         add_action('admin_menu', [$this, 'add_admin_menu']);
         add_action('admin_init', [$this, 'handle_admin_actions']);
+        add_action('wp_head', [$this, 'print_pwa_manifest']);
+        add_action('template_redirect', [$this, 'serve_pwa_resources']);
 
         add_action('wp_ajax_ua_track_ad', [$this, 'track_ad_click']);
         add_action('wp_ajax_nopriv_ua_track_ad', [$this, 'track_ad_click']);
@@ -29,16 +31,72 @@ final class UA_Light_Alert {
         add_action('wp_ajax_nopriv_ua_get_ads', 'ua_light_get_ads');
     }
 
+
+    public function print_pwa_manifest() {
+        $manifest_url = add_query_arg('ua_light_manifest', '1', home_url('/'));
+        echo '<link rel="manifest" href="' . esc_url($manifest_url) . '">' . "\n";
+        echo '<meta name="mobile-web-app-capable" content="yes">' . "\n";
+        echo '<meta name="apple-mobile-web-app-capable" content="yes">' . "\n";
+        echo '<meta name="theme-color" content="#ff6b00">' . "\n";
+    }
+
+    public function serve_pwa_resources() {
+        if (isset($_GET['ua_light_manifest'])) {
+            $icon = get_site_icon_url(512);
+            $manifest = [
+                'name' => get_bloginfo('name') . ' — UA Light Alert',
+                'short_name' => 'UA Light Alert',
+                'description' => 'Графіки та сповіщення про відключення електроенергії',
+                'start_url' => home_url('/'),
+                'scope' => home_url('/'),
+                'display' => 'standalone',
+                'background_color' => '#ffffff',
+                'theme_color' => '#ff6b00',
+                'icons' => $icon ? [
+                    ['src' => $icon, 'sizes' => '192x192', 'type' => 'image/png', 'purpose' => 'any'],
+                    ['src' => $icon, 'sizes' => '512x512', 'type' => 'image/png', 'purpose' => 'any']
+                ] : []
+            ];
+            nocache_headers();
+            header('Content-Type: application/manifest+json; charset=utf-8');
+            echo wp_json_encode($manifest);
+            exit;
+        }
+
+        if (isset($_GET['ua_light_sw'])) {
+            $file = plugin_dir_path(__FILE__) . 'assets/ua-light-alert-sw.js';
+            if (!is_readable($file)) {
+                status_header(404);
+                exit;
+            }
+            nocache_headers();
+            header('Content-Type: application/javascript; charset=utf-8');
+            header('Service-Worker-Allowed: ' . wp_parse_url(home_url('/'), PHP_URL_PATH));
+            readfile($file);
+            exit;
+        }
+    }
+
     private function default_settings() {
         return [
             'notice_minutes' => 5,
             'sound_url'      => '',
+            'sound_off_url'  => '',
+            'sound_on_url'   => '',
         ];
     }
 
     private function get_settings() {
         $settings = get_option($this->settings_key, []);
-        return wp_parse_args(is_array($settings) ? $settings : [], $this->default_settings());
+        $settings = wp_parse_args(is_array($settings) ? $settings : [], $this->default_settings());
+        // Backward compatibility: the old single sound is used for both event types.
+        if (empty($settings['sound_off_url']) && !empty($settings['sound_url'])) {
+            $settings['sound_off_url'] = $settings['sound_url'];
+        }
+        if (empty($settings['sound_on_url']) && !empty($settings['sound_url'])) {
+            $settings['sound_on_url'] = $settings['sound_url'];
+        }
+        return $settings;
     }
 
     /* ---------------------------------------------------------
@@ -65,9 +123,14 @@ final class UA_Light_Alert {
         if (isset($_POST['ua_save_settings'])) {
             check_admin_referer('ua_settings_action');
 
+            $notice_minutes = absint($_POST['notice_minutes'] ?? 5);
+            if (!in_array($notice_minutes, [1, 5, 10], true)) {
+                $notice_minutes = 5;
+            }
             $settings = [
-                'notice_minutes' => max(1, min(120, absint($_POST['notice_minutes'] ?? 5))),
-                'sound_url'      => esc_url_raw(wp_unslash($_POST['sound_url'] ?? '')),
+                'notice_minutes' => $notice_minutes,
+                'sound_off_url'  => esc_url_raw(wp_unslash($_POST['sound_off_url'] ?? '')),
+                'sound_on_url'   => esc_url_raw(wp_unslash($_POST['sound_on_url'] ?? '')),
             ];
 
             update_option($this->settings_key, $settings);
@@ -133,6 +196,7 @@ final class UA_Light_Alert {
     }
 
     public function render_admin_page() {
+        wp_enqueue_media();
         $ads = get_option($this->option_key, []);
         if (!is_array($ads)) {
             $ads = [];
@@ -162,38 +226,65 @@ final class UA_Light_Alert {
                         <tr>
                             <th scope="row">Попереджати за (хвилин)</th>
                             <td>
-                                <input
-                                    type="number"
-                                    name="notice_minutes"
-                                    value="<?php echo esc_attr($settings['notice_minutes']); ?>"
-                                    min="1"
-                                    max="120"
-                                    required
-                                >
-                                <p class="description">
-                                    За скільки хвилин до відключення або відновлення показувати попередження.
-                                    За замовчуванням — 5 хвилин.
-                                </p>
+                                <select name="notice_minutes">
+                                    <?php foreach ([1, 5, 10] as $minutes) : ?>
+                                        <option value="<?php echo esc_attr($minutes); ?>" <?php selected((int) $settings['notice_minutes'], $minutes); ?>>
+                                            <?php echo esc_html($minutes); ?> хвилин
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                                <p class="description">Окреме попередження перед кожною зміною: вимкненням або відновленням електропостачання.</p>
                             </td>
                         </tr>
-
                         <tr>
-                            <th scope="row">Звуковий файл MP3</th>
+                            <th scope="row">Звук перед вимкненням</th>
                             <td>
-                                <input
-                                    type="url"
-                                    name="sound_url"
-                                    value="<?php echo esc_attr($settings['sound_url']); ?>"
-                                    class="regular-text"
-                                    placeholder="https://ваш-сайт.ua/wp-content/uploads/alert.mp3"
-                                >
-                                <p class="description">
-                                    Завантажте MP3 у розділ «Медіафайли» та вставте URL.
-                                    Власний звук відтворюється на відкритій сторінці.
-                                </p>
+                                <input type="url" id="ua-light-sound-off" name="sound_off_url"
+                                    value="<?php echo esc_attr($settings['sound_off_url']); ?>" class="regular-text"
+                                    placeholder="https://example.com/off.mp3">
+                                <button type="button" class="button ua-light-select-audio" data-target="ua-light-sound-off">Обрати MP3 з пристрою</button>
+                                <button type="button" class="button ua-light-preview-audio" data-target="ua-light-sound-off">Прослухати</button>
+                                <p class="description">Можна вибрати файл із медіатеки/пристрою або вставити пряме посилання на MP3.</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row">Звук перед увімкненням</th>
+                            <td>
+                                <input type="url" id="ua-light-sound-on" name="sound_on_url"
+                                    value="<?php echo esc_attr($settings['sound_on_url']); ?>" class="regular-text"
+                                    placeholder="https://example.com/on.mp3">
+                                <button type="button" class="button ua-light-select-audio" data-target="ua-light-sound-on">Обрати MP3 з пристрою</button>
+                                <button type="button" class="button ua-light-preview-audio" data-target="ua-light-sound-on">Прослухати</button>
+                                <p class="description">Звук, який відтворюється перед відновленням електропостачання.</p>
                             </td>
                         </tr>
                     </table>
+                    <script>
+                    jQuery(function($) {
+                        $('.ua-light-select-audio').on('click', function(e) {
+                            e.preventDefault();
+                            var target = $('#' + $(this).data('target'));
+                            var frame = wp.media({
+                                title: 'Оберіть MP3-файл',
+                                button: { text: 'Використати цей MP3' },
+                                library: { type: 'audio' },
+                                multiple: false
+                            });
+                            frame.on('select', function() {
+                                var item = frame.state().get('selection').first().toJSON();
+                                if (item.url) target.val(item.url);
+                            });
+                            frame.open();
+                        });
+                        $('.ua-light-preview-audio').on('click', function(e) {
+                            e.preventDefault();
+                            var url = $('#' + $(this).data('target')).val();
+                            if (!url) { window.alert('Спочатку оберіть або вкажіть MP3.'); return; }
+                            var audio = new Audio(url);
+                            audio.play().catch(function() { window.alert('Браузер не дозволив відтворити файл. Перевірте посилання.'); });
+                        });
+                    });
+                    </script>
 
                     <?php submit_button('Зберегти налаштування', 'primary', 'ua_save_settings'); ?>
                 </form>
@@ -376,7 +467,10 @@ final class UA_Light_Alert {
         $settings = $this->get_settings();
 
         $notice_minutes = absint($settings['notice_minutes']);
-        $sound_url = esc_url($settings['sound_url']);
+        $sound_off_url = esc_url($settings['sound_off_url']);
+        $sound_on_url = esc_url($settings['sound_on_url']);
+        $service_worker_url = add_query_arg('ua_light_sw', '1', home_url('/'));
+        $service_worker_scope = home_url('/');
 
         $ajax_url = admin_url('admin-ajax.php');
         $nonce = wp_create_nonce('ua_light_frontend');
@@ -384,11 +478,7 @@ final class UA_Light_Alert {
         ob_start();
         ?>
         <div id="ua-light-widget" class="ua-light-widget">
-            <audio id="ua-alert-sound" preload="auto">
-                <?php if ($sound_url) : ?>
-                    <source src="<?php echo $sound_url; ?>" type="audio/mpeg">
-                <?php endif; ?>
-            </audio>
+            <audio id="ua-alert-sound" preload="none"></audio>
 
             <div class="ua-controls">
                 <label class="ua-field">
@@ -546,6 +636,13 @@ final class UA_Light_Alert {
             var ticker = null;
             var refreshTicker = null;
             var noticeMinutes = <?php echo (int) $notice_minutes; ?>;
+            var soundUrls = {
+                off: <?php echo wp_json_encode($sound_off_url); ?>,
+                on: <?php echo wp_json_encode($sound_on_url); ?>
+            };
+            var serviceWorkerUrl = <?php echo wp_json_encode($service_worker_url); ?>;
+            var serviceWorkerScope = <?php echo wp_json_encode($service_worker_scope); ?>;
+            var serviceWorkerRegistration = null;
             var ajaxUrl = <?php echo wp_json_encode($ajax_url); ?>;
             var ajaxNonce = <?php echo wp_json_encode($nonce); ?>;
 
@@ -682,11 +779,17 @@ final class UA_Light_Alert {
                     Notification.requestPermission().catch(function() {});
                 }
 
+                registerPwaServiceWorker();
+
                 if (soundEl) {
-                    soundEl.play().then(function() {
-                        soundEl.pause();
-                        soundEl.currentTime = 0;
-                    }).catch(function() {});
+                    var testSound = soundUrls.off || soundUrls.on;
+                    if (testSound) {
+                        soundEl.src = testSound;
+                        soundEl.play().then(function() {
+                            soundEl.pause();
+                            soundEl.currentTime = 0;
+                        }).catch(function() {});
+                    }
                 }
 
                 activateSchedule();
@@ -880,11 +983,26 @@ final class UA_Light_Alert {
                 }
             }
 
+            function registerPwaServiceWorker() {
+                if (!('serviceWorker' in navigator)) {
+                    return Promise.resolve(null);
+                }
+                return navigator.serviceWorker.register(serviceWorkerUrl, {scope: serviceWorkerScope})
+                    .then(function(registration) {
+                        serviceWorkerRegistration = registration;
+                        return registration;
+                    })
+                    .catch(function() { return null; });
+            }
+
             function sendActivePageAlert(message, event) {
                 noticeBox.style.display = 'block';
                 noticeBox.textContent = '🔔 Увага! ' + message + '!';
 
-                if (soundEl && soundEl.querySelector('source')) {
+                var soundUrl = event.status === 'yes' ? soundUrls.on : soundUrls.off;
+                if (soundEl && soundUrl) {
+                    soundEl.pause();
+                    soundEl.src = soundUrl;
                     soundEl.currentTime = 0;
                     soundEl.play().catch(function() {});
                 }
@@ -894,19 +1012,28 @@ final class UA_Light_Alert {
                 }
 
                 if ('Notification' in window && Notification.permission === 'granted') {
-                    try {
-                        var notification = new Notification('UA Light Alert', {
-                            body: message + ' о ' +
-                                String(event.time.getHours()).padStart(2, '0') + ':00',
-                            icon: '<?php echo esc_js(get_site_icon_url(192)); ?>',
-                            tag: event.key
-                        });
-
-                        notification.onclick = function() {
-                            window.focus();
-                            notification.close();
-                        };
-                    } catch (e) {}
+                    registerPwaServiceWorker().then(function(registration) {
+                        var title = 'UA Light Alert';
+                        var body = message + ' о ' +
+                            String(event.time.getHours()).padStart(2, '0') + ':00';
+                        if (registration && registration.showNotification) {
+                            registration.showNotification(title, {
+                                body: body,
+                                icon: '<?php echo esc_js(get_site_icon_url(192)); ?>',
+                                tag: event.key,
+                                renotify: true,
+                                data: {url: window.location.href}
+                            }).catch(function() {});
+                        } else {
+                            try {
+                                var notification = new Notification(title, {body: body, tag: event.key});
+                                notification.onclick = function() {
+                                    window.focus();
+                                    notification.close();
+                                };
+                            } catch (e) {}
+                        }
+                    });
                 }
             }
 

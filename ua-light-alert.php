@@ -2,7 +2,7 @@
 /**
  * Plugin Name: UA Light Alert
  * Description: Графіки відключень, CRM рекламодавців та сповіщення про зміни електропостачання.
- * Version: 4.2.2
+ * Version: 4.2.3
  * Update URI: https://github.com/portallcomua/UA-Light-Alert
  * Author: UA Tools
  * Text Domain: ua-light-alert
@@ -19,6 +19,8 @@ final class UA_Light_Alert {
 
     public function __construct() {
         add_shortcode('ua_light_schedule', [$this, 'render_frontend']);
+        // Friendly Ukrainian alias; the legacy shortcode remains fully supported.
+        add_shortcode('grafik_svitla', [$this, 'render_frontend']);
 
         add_action('admin_menu', [$this, 'add_admin_menu']);
         add_action('admin_init', [$this, 'handle_admin_actions']);
@@ -34,7 +36,15 @@ final class UA_Light_Alert {
 
 
     public function print_pwa_manifest() {
-        $manifest_url = add_query_arg('ua_light_manifest', '1', home_url('/'));
+        $page_id = get_queried_object_id();
+        $start_page = $page_id ? get_permalink($page_id) : '';
+        if (!$start_page) {
+            $start_page = home_url('/');
+        }
+        $manifest_url = add_query_arg(
+            ['ua_light_manifest' => '1', 'ua_light_start' => rawurlencode($start_page)],
+            home_url('/')
+        );
         echo '<link rel="manifest" href="' . esc_url($manifest_url) . '">' . "\n";
         echo '<meta name="mobile-web-app-capable" content="yes">' . "\n";
         echo '<meta name="apple-mobile-web-app-capable" content="yes">' . "\n";
@@ -46,9 +56,13 @@ final class UA_Light_Alert {
             $icon_192 = get_site_icon_url(192);
             $icon_512 = get_site_icon_url(512);
             $start_url = home_url('/');
+            $requested_start = isset($_GET['ua_light_start']) ? esc_url_raw(wp_unslash($_GET['ua_light_start'])) : '';
             $referrer = !empty($_SERVER['HTTP_REFERER']) ? esc_url_raw(wp_unslash($_SERVER['HTTP_REFERER'])) : '';
-            if ($referrer && wp_parse_url($referrer, PHP_URL_HOST) === wp_parse_url(home_url('/'), PHP_URL_HOST)) {
-                $start_url = $referrer;
+            $candidate = $requested_start ? $requested_start : $referrer;
+            if ($candidate
+                && wp_parse_url($candidate, PHP_URL_HOST) === wp_parse_url(home_url('/'), PHP_URL_HOST)
+                && 0 === strpos((string) wp_parse_url($candidate, PHP_URL_PATH), (string) wp_parse_url(home_url('/'), PHP_URL_PATH))) {
+                $start_url = $candidate;
             }
             $icons = [];
             if ($icon_192) {
@@ -116,8 +130,8 @@ final class UA_Light_Alert {
 
     public function add_admin_menu() {
         add_menu_page(
-            'UA Light Alert',
-            'UA Light Alert',
+            'Графік світла',
+            'Графік світла',
             'manage_options',
             'ua-light-alert',
             [$this, 'render_admin_page'],
@@ -219,7 +233,7 @@ final class UA_Light_Alert {
         $edit_ad = ($edit_id >= 0 && isset($ads[$edit_id])) ? $ads[$edit_id] : null;
         ?>
         <div class="wrap">
-            <h1>UA Light Alert — Налаштування та рекламодавці</h1>
+            <h1>Графік світла — Налаштування та рекламодавці</h1>
 
             <?php if (isset($_GET['msg'])) : ?>
                 <div class="notice notice-success is-dismissible">

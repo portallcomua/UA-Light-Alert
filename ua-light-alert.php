@@ -1235,6 +1235,7 @@ final class UA_Light_Alert_GitHub_Updater {
         add_filter('pre_set_site_transient_update_plugins', [$this, 'filter_update_transient']);
 
         add_filter('plugins_api', [$this, 'plugin_information'], 20, 3);
+        add_filter('upgrader_source_selection', [$this, 'normalize_package_directory'], 10, 4);
     }
 
     private function get_release($force = false) {
@@ -1329,6 +1330,48 @@ final class UA_Light_Alert_GitHub_Updater {
         }
         $transient->response[$this->plugin_file] = $candidate;
         return $transient;
+    }
+
+
+
+    /**
+     * GitHub's generated ZIP has a commit-suffixed root folder. Rename only
+     * this plugin's extracted package to the currently installed directory
+     * so WordPress updates in place instead of creating a duplicate plugin.
+     */
+    public function normalize_package_directory($source, $remote_source, $upgrader, $hook_extra) {
+        if (empty($hook_extra['plugin']) || $hook_extra['plugin'] !== $this->plugin_file) {
+            return $source;
+        }
+
+        $expected_dir = dirname($this->plugin_file);
+        if ('.' === $expected_dir || '' === $expected_dir) {
+            $expected_dir = self::SLUG;
+        }
+
+        $source = untrailingslashit($source);
+        $parent = dirname($source);
+        $target = trailingslashit($parent) . $expected_dir;
+
+        if (basename($source) === $expected_dir) {
+            return $source;
+        }
+
+        if (is_dir($target)) {
+            return new WP_Error(
+                'ua_light_alert_update_directory_conflict',
+                'Не вдалося оновити UA Light Alert: у тимчасовому каталозі вже існує папка призначення.'
+            );
+        }
+
+        if (!@rename($source, $target)) {
+            return new WP_Error(
+                'ua_light_alert_update_directory_rename_failed',
+                'Не вдалося підготувати архів UA Light Alert для оновлення.'
+            );
+        }
+
+        return trailingslashit($target);
     }
 
     public function plugin_information($result, $action, $args) {

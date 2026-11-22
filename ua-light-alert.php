@@ -2,7 +2,7 @@
 /**
  * Plugin Name: UA Light Alert
  * Description: Графіки відключень, CRM рекламодавців та сповіщення про зміни електропостачання.
- * Version: 4.5.4
+ * Version: 4.5.5
  * Plugin URI: https://uaserver.pp.ua/svitlo/
  * Update URI: https://github.com/portallcomua/UA-Light-Alert
  * Author: UAServer
@@ -738,7 +738,7 @@ final class UA_Light_Alert {
                 </button>
 
                 <div class="ua-pwa-install-wrap">
-                    <button type="button" id="ua-pwa-install" class="ua-pwa-install" aria-label="Встановити додаток Графік відключень" hidden>
+                    <button type="button" id="ua-pwa-install" class="ua-pwa-install" aria-label="Встановити додаток Графік відключень">
                         <span class="ua-pwa-install-icon" aria-hidden="true">⬇</span>
                         Встановити додаток Графік відключень
                     </button>
@@ -983,8 +983,11 @@ final class UA_Light_Alert {
             } else {
                 var initialUa = window.navigator.userAgent || '';
                 var isIosInstall = /iphone|ipad|ipod/i.test(initialUa);
-                // iOS Safari has no beforeinstallprompt event; only there show the manual Add to Home Screen flow.
-                if (isIosInstall && installButton) installButton.hidden = false;
+                // Keep the install button visible on all supported devices. Chromium's native prompt is used when available; iOS shows its own instructions.
+                if (installButton) {
+                    installButton.hidden = false;
+                    installButton.style.display = 'inline-flex';
+                }
 
                 window.addEventListener('beforeinstallprompt', function(event) {
                     event.preventDefault();
@@ -1024,7 +1027,7 @@ final class UA_Light_Alert {
                         if (isIos) {
                             showInstallHelp('Щоб встановити додаток на iPhone: натисніть «Поділитися» у Safari, потім «На початковий екран» і «Додати».');
                         } else {
-                            showInstallHelp('Chrome ще не підготував встановлення. Перезавантажте сторінку та спробуйте ще раз.');
+                            showInstallHelp('Встановлення через Chrome ще не готове. Переконайтеся, що відкрили сайт у Chrome, а не у вбудованому браузері. Якщо кнопка не відкриває системне вікно, оновіть сторінку та натисніть її ще раз.');
                         }
                     });
                 }

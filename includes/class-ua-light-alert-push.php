@@ -11,6 +11,8 @@ final class UA_Light_Alert_Push {
     const KEYS_OPTION = 'ua_light_push_vapid_keys';
     const SUBS_OPTION = 'ua_light_push_subscriptions';
     const CRON_HOOK = 'ua_light_alert_push_tick';
+    const LAST_RUN_OPTION = 'ua_light_push_last_run';
+    const LAST_STATUS_OPTION = 'ua_light_push_last_status';
 
     public function __construct() {
         add_filter('cron_schedules', [$this, 'add_minute_schedule']);
@@ -35,6 +37,24 @@ final class UA_Light_Alert_Push {
         }
     }
 
+    public static function activate() {
+        if (!wp_next_scheduled(self::CRON_HOOK)) {
+            wp_schedule_event(time() + 30, 'ua_light_minute', 'ua_light_minute');
+        }
+    }
+
+    public static function get_cron_status() {
+        $next = wp_next_scheduled(self::CRON_HOOK);
+        $last = (int) get_option(self::LAST_RUN_OPTION, 0);
+        return [
+            'scheduled' => (bool) $next,
+            'next_run' => $next ? (int) $next : 0,
+            'last_run' => $last,
+            'last_status' => (string) get_option(self::LAST_STATUS_OPTION, ''),
+            'wp_cron_disabled' => defined('DISABLE_WP_CRON') && DISABLE_WP_CRON,
+        ];
+    }
+
     public static function get_public_key() {
         $keys = self::get_vapid_keys();
         return $keys && !empty($keys['public']) ? $keys['public'] : '';
@@ -46,10 +66,7 @@ final class UA_Light_Alert_Push {
     }
 
     public static function deactivate() {
-        $timestamp = wp_next_scheduled(self::CRON_HOOK);
-        if ($timestamp) {
-            wp_unschedule_event($timestamp, self::CRON_HOOK);
-        }
+        wp_clear_scheduled_hook(self::CRON_HOOK);
     }
 
     private static function get_vapid_keys() {
@@ -153,7 +170,11 @@ final class UA_Light_Alert_Push {
     }
 
     public function dispatch_due_alerts() {
+        update_option(self::LAST_RUN_OPTION, time(), false);
+        update_option(self::LAST_STATUS_OPTION, 'running', false);
+
         if (!function_exists('openssl_pkey_derive')) {
+            update_option(self::LAST_STATUS_OPTION, 'openssl_missing', false);
             return;
         }
         $subscriptions = get_option(self::SUBS_OPTION, []);
@@ -207,6 +228,7 @@ final class UA_Light_Alert_Push {
             }
         }
         update_option(self::SUBS_OPTION, $subscriptions, false);
+        update_option(self::LAST_STATUS_OPTION, 'ok', false);
     }
 
     private function get_region_data($region) {

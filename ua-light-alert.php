@@ -2,7 +2,7 @@
 /**
  * Plugin Name: UA Light Alert
  * Description: Графіки відключень, CRM рекламодавців та сповіщення про зміни електропостачання.
- * Version: 4.5.3
+ * Version: 4.5.4
  * Plugin URI: https://uaserver.pp.ua/svitlo/
  * Update URI: https://github.com/portallcomua/UA-Light-Alert
  * Author: UAServer
@@ -774,6 +774,7 @@ final class UA_Light_Alert {
             }
             .ua-light-widget * { box-sizing: border-box; }
             .ua-pwa-install-wrap { margin: 14px 0 4px; }
+            .ua-light-widget .ua-pwa-install[hidden] { display: none !important; }
             .ua-light-widget .ua-pwa-install {
                 display: inline-flex;
                 align-items: center;
@@ -1022,8 +1023,8 @@ final class UA_Light_Alert {
                         var isIos = /iphone|ipad|ipod/i.test(ua);
                         if (isIos) {
                             showInstallHelp('Щоб встановити додаток на iPhone: натисніть «Поділитися» у Safari, потім «На початковий екран» і «Додати».');
-                        } else if (isIos) {
-                            showInstallHelp('Щоб встановити додаток на iPhone: натисніть «Поділитися» у Safari, потім «На початковий екран» і «Додати».');
+                        } else {
+                            showInstallHelp('Chrome ще не підготував встановлення. Перезавантажте сторінку та спробуйте ще раз.');
                         }
                     });
                 }
@@ -1378,6 +1379,23 @@ final class UA_Light_Alert {
                 return navigator.serviceWorker.register(serviceWorkerUrl, {scope: serviceWorkerScope})
                     .then(function(registration) {
                         serviceWorkerRegistration = registration;
+
+                        // When this is the first visit (or the worker was just updated),
+                        // let the new worker activate, then reload once so Chromium can
+                        // evaluate installability with an active fetch handler.
+                        var worker = registration.installing;
+                        if (worker) {
+                            worker.addEventListener('statechange', function() {
+                                if (worker.state !== 'activated') return;
+                                try {
+                                    var reloadKey = 'ua_light_pwa_sw_activated_' + serviceWorkerScope;
+                                    if (!sessionStorage.getItem(reloadKey)) {
+                                        sessionStorage.setItem(reloadKey, '1');
+                                        window.location.reload();
+                                    }
+                                } catch (e) {}
+                            });
+                        }
                         return registration;
                     })
                     .catch(function() { return null; });

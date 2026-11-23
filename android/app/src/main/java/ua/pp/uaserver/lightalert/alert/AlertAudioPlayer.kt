@@ -61,7 +61,7 @@ class AlertAudioPlayer(private val context: Context) {
                 return
             }
 
-            val afterSpeech = {
+            val afterSpeech: () -> Unit = {
                 if (!stopped && remainingRepeats > 0) {
                     mainHandler.postDelayed({ playCycle(remainingRepeats - 1) }, 500L)
                 } else {
@@ -69,7 +69,7 @@ class AlertAudioPlayer(private val context: Context) {
                 }
             }
 
-            val startSpeechOrFinish = {
+            val startSpeechOrFinish: () -> Unit = {
                 if (!stopped && shouldSpeak) {
                     val normalized = UkrainianSpeechNormalizer.normalize(rawText, eventTime, groupLabel)
                     speakUkrainian(normalized, settings, afterSpeech)

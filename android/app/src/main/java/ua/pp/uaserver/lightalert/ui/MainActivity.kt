@@ -20,8 +20,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import org.json.JSONObject
-import ua.pp.uaserver.lightalert.R
-import ua.pp.uaserver.lightalert.alarm.OutageAlarmReceiver
+import ua.pp.uaserver.lightalert.BuildConfig
 import ua.pp.uaserver.lightalert.alarm.ScheduleAlarmScheduler
 import ua.pp.uaserver.lightalert.data.AdItem
 import ua.pp.uaserver.lightalert.data.ApiClient
@@ -29,9 +28,12 @@ import ua.pp.uaserver.lightalert.data.NextOutageEvent
 import ua.pp.uaserver.lightalert.data.PrefsStore
 import ua.pp.uaserver.lightalert.data.SiteConfig
 import ua.pp.uaserver.lightalert.databinding.ActivityMainBinding
+import ua.pp.uaserver.lightalert.update.AppUpdateController
+import ua.pp.uaserver.lightalert.update.AppUpdateInfo
+import ua.pp.uaserver.lightalert.update.AppUpdater
 import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
@@ -39,6 +41,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var b: ActivityMainBinding
     private lateinit var prefs: PrefsStore
     private lateinit var api: ApiClient
+    private lateinit var updateController: AppUpdateController
     private val adapter = ScheduleAdapter()
     private val executor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -47,7 +50,6 @@ class MainActivity : AppCompatActivity() {
     private var currentGroupsObj: JSONObject? = null
     private var groupIds: List<String> = emptyList()
     private var currentNextEvent: NextOutageEvent? = null
-    private var currentAd: AdItem? = null
     private var lastTrackedAdKey: String = ""
     private var suppressingRegionCallback = false
     private var suppressingGroupCallback = false
@@ -72,13 +74,14 @@ class MainActivity : AppCompatActivity() {
 
         ViewCompat.setOnApplyWindowInsetsListener(b.mainRoot) { v, insets ->
             val sys = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            val pad = (16 * resources.displayMetrics.density).toInt()
+            val pad = (14 * resources.displayMetrics.density).toInt()
             v.setPadding(pad, sys.top + pad, pad, sys.bottom + pad)
             insets
         }
 
         prefs = PrefsStore(this)
         api = ApiClient(this, prefs)
+        updateController = AppUpdateController(this, executor)
 
         ScheduleAlarmScheduler.ensureNotificationChannels(this)
         ScheduleAlarmScheduler.schedulePeriodicSync(this)
@@ -88,25 +91,11 @@ class MainActivity : AppCompatActivity() {
 
         b.swipeRefresh.setOnRefreshListener {
             loadAllData()
+            checkAppUpdate(force = true)
         }
 
         b.btnSettings.setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
-        }
-
-        b.btnTestAlert.setOnClickListener {
-            val activeGroup = prefs.selectedGroup.ifBlank { "GPV1.1" }
-            val testTime = SimpleDateFormat("HH:mm", Locale.US).format(Date(System.currentTimeMillis() + 5 * 60_000L))
-            val i = Intent(this, AlertActivity::class.java).apply {
-                putExtra(OutageAlarmReceiver.EXTRA_TYPE, "off")
-                putExtra(OutageAlarmReceiver.EXTRA_EVENT_TIME_MILLIS, System.currentTimeMillis() + 5 * 60_000L)
-                putExtra(OutageAlarmReceiver.EXTRA_EVENT_TIME_FMT, testTime)
-                putExtra(OutageAlarmReceiver.EXTRA_REGION, prefs.selectedRegion)
-                putExtra(OutageAlarmReceiver.EXTRA_GROUP, activeGroup)
-                putExtra(AlertActivity.EXTRA_AUTO_PLAY, true)
-                putExtra(AlertActivity.EXTRA_IS_TEST, true)
-            }
-            startActivity(i)
         }
 
         b.btnGrantPermissions.setOnClickListener {
@@ -143,11 +132,14 @@ class MainActivity : AppCompatActivity() {
         siteConfig = api.getCachedSiteConfig()
         bindSiteConfig(siteConfig)
         loadCachedScheduleImmediately()
+        loadAdsForSelection()
         loadAllData()
+        checkAppUpdate(force = false)
     }
 
     override fun onResume() {
         super.onResume()
+        updateController.onResume()
         updatePermissionBanner()
         siteConfig = api.getCachedSiteConfig()
         bindSiteConfig(siteConfig)
@@ -164,6 +156,42 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         executor.shutdownNow()
+    }
+
+    private fun checkAppUpdate(force: Boolean) {
+        val now = System.currentTimeMillis()
+        if (!force && (now - prefs.lastUpdateCheckMillis) < 30 * 60_000L) {
+            return
+        }
+        prefs.lastUpdateCheckMillis = now
+
+        executor.execute {
+            when (val res = updateController.updater.checkForUpdate()) {
+                is AppUpdater.CheckResult.UpdateAvailable -> {
+                    mainHandler.post { showUpdateBanner(res.info) }
+                }
+                is AppUpdater.CheckResult.UpToDate -> {
+                    mainHandler.post { b.cardAppUpdate.visibility = View.GONE }
+                }
+                is AppUpdater.CheckResult.Error -> {
+                    // Silent on background check.
+                }
+            }
+        }
+    }
+
+    private fun showUpdateBanner(info: AppUpdateInfo) {
+        if (isFinishing || isDestroyed) return
+        b.cardAppUpdate.visibility = View.VISIBLE
+        b.tvAppUpdateTitle.text = "Доступна нова версія v. ${info.version}"
+        b.btnAppUpdate.setOnClickListener {
+            updateController.startDownloadAndInstall(info)
+        }
+        if (prefs.dismissedUpdateVersion != info.version) {
+            updateController.showUpdateDialog(info) {
+                prefs.dismissedUpdateVersion = info.version
+            }
+        }
     }
 
     private fun updatePermissionBanner() {
@@ -234,6 +262,7 @@ class MainActivity : AppCompatActivity() {
                 siteConfig = cfg
                 bindSiteConfig(cfg)
                 applyScheduleJson(scheduleRaw)
+                loadAdsForSelection()
                 b.swipeRefresh.isRefreshing = false
             }
         }
@@ -252,23 +281,29 @@ class MainActivity : AppCompatActivity() {
             val raw = api.fetchRegionScheduleJson(region)
             mainHandler.post {
                 applyScheduleJson(raw)
+                loadAdsForSelection()
                 b.swipeRefresh.isRefreshing = false
             }
         }
     }
 
     private fun bindSiteConfig(cfg: SiteConfig) {
-        b.tvSiteTitle.text = cfg.siteName
+        val cleanVersion = BuildConfig.VERSION_NAME.removeSuffix("-debug")
+        b.tvSiteTitle.text = "Графік відключень v. $cleanVersion"
         val effective = prefs.resolveEffectiveSettings(cfg)
 
-        val proText = when {
-            !cfg.pro.monetizationEnabled -> "Синхронізовано · усі налаштування відкриті"
-            cfg.pro.status == "licensed" -> "Pro активовано · попередження за ${effective.noticeMinutes} хв"
-            cfg.pro.status == "trial" -> "Тріал Pro: лишилось ${cfg.pro.trialDaysLeft} дн."
-            else -> "Базовий режим · попередження як на сайті (${cfg.settings.noticeMinutes} хв)"
+        if (cfg.pro.monetizationEnabled) {
+            b.tvProBadge.visibility = View.VISIBLE
+            b.tvProBadge.text = when (cfg.pro.status) {
+                "licensed" -> "Pro активовано"
+                "trial" -> "Тріал Pro: лишилось ${cfg.pro.trialDaysLeft} дн."
+                else -> "Базовий режим (${cfg.settings.noticeMinutes} хв)"
+            }
+        } else {
+            b.tvProBadge.visibility = View.GONE
         }
-        b.tvProBadge.text = proText
-        b.tvNoticeSummary.text = "Попередження спрацює автоматично за ${effective.noticeMinutes} хв (${modeLabel(effective.alertMode)})."
+
+        b.tvNoticeSummary.text = "Попередження за ${effective.noticeMinutes} хв (${modeLabel(effective.alertMode)})."
 
         val names = cfg.regions.map { it.name }
         val regAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, names)
@@ -292,10 +327,10 @@ class MainActivity : AppCompatActivity() {
         currentGroupsObj = groupsObj
         groupIds = ApiClient.extractGroupIds(groupsObj)
 
-        if (updated.isNotBlank()) {
-            b.tvScheduleDate.text = formatUpdatedDate(updated)
+        b.tvScheduleDate.text = if (updated.isNotBlank()) {
+            "Оновлено: ${formatUpdatedDate(updated)}"
         } else {
-            b.tvScheduleDate.text = ""
+            ""
         }
 
         if (groupIds.isEmpty()) {
@@ -321,12 +356,11 @@ class MainActivity : AppCompatActivity() {
         suppressingGroupCallback = false
 
         applySelectedGroup(targetGroup)
-        loadAdsForSelection()
     }
 
     private fun applySelectedGroup(groupId: String) {
         val groupObj = currentGroupsObj?.optJSONObject(groupId)
-        val rows = ApiClient.buildHourRows(groupObj)
+        val rows = ApiClient.buildHalfHourRows(groupObj)
         adapter.submitList(rows)
         currentNextEvent = ApiClient.findNextOutageEvent(groupObj)
         updateCountdownUi()
@@ -336,25 +370,23 @@ class MainActivity : AppCompatActivity() {
     private fun updateCountdownUi() {
         val next = currentNextEvent
         if (next == null) {
-            b.tvCurrentStatusBadge.text = "ДАНІ ОНОВЛЮЮТЬСЯ"
-            b.tvNextEventTitle.text = "Оберіть регіон і чергу"
+            b.tvCurrentStatusBadge.text = "⏳ Наступна зміна статусу"
+            b.tvNextEventTitle.text = "Оберіть область і чергу"
             b.tvCountdown.text = "--:--:--"
             return
         }
 
         val hasLightNow = next.currentStatus == "yes"
-        b.tvCurrentStatusBadge.text = if (hasLightNow) "ЗАРАЗ: СВІТЛО Є" else "ЗАРАЗ: СВІТЛА НЕМАЄ"
-        b.tvCurrentStatusBadge.setTextColor(
-            ContextCompat.getColor(
-                this,
-                if (hasLightNow) R.color.status_on_fg else R.color.status_off_fg
-            )
-        )
+        b.tvCurrentStatusBadge.text = if (hasLightNow) {
+            "⏳ Зараз: світло є · Наступна зміна"
+        } else {
+            "⏳ Зараз: світла немає · Наступна зміна"
+        }
 
         b.tvNextEventTitle.text = if (next.type == "off") {
-            "Наступне вимкнення о ${next.eventTimeFormatted}"
+            "Вимкнення за графіком о ${next.eventTimeFormatted}"
         } else {
-            "Наступне увімкнення о ${next.eventTimeFormatted}"
+            "Увімкнення за графіком о ${next.eventTimeFormatted}"
         }
 
         val diffSec = ((next.eventTimeMillis - System.currentTimeMillis()) / 1000L).coerceAtLeast(0L)
@@ -367,45 +399,85 @@ class MainActivity : AppCompatActivity() {
     private fun loadAdsForSelection() {
         val region = prefs.selectedRegion
         val group = prefs.selectedGroup
-        if (region.isBlank() || group.isBlank()) return
 
         executor.execute {
             val ads = api.fetchAds(region, group)
-            val ad = ads.firstOrNull()
+            val ad: AdItem? = ads.firstOrNull()
+            val bannerBitmap = if (ad != null && ad.imageUrl.isNotBlank()) {
+                api.fetchBitmap(ad.imageUrl)
+            } else {
+                null
+            }
+
             mainHandler.post {
-                currentAd = ad
                 if (ad == null) {
                     b.cardAd.visibility = View.GONE
+                    return@post
+                }
+
+                b.cardAd.visibility = View.VISIBLE
+
+                if (bannerBitmap != null) {
+                    b.ivAdBanner.setImageBitmap(bannerBitmap)
+                    b.ivAdBanner.visibility = View.VISIBLE
                 } else {
-                    b.cardAd.visibility = View.VISIBLE
-                    b.tvAdLabel.text = if (ad.name.isNotBlank()) ad.name.uppercase(Locale.getDefault()) else "ПАРТНЕРСЬКА ПРОПОЗИЦІЯ"
-                    b.tvAdText.text = ad.text
+                    b.ivAdBanner.visibility = View.GONE
+                }
+
+                val caption = ad.text.ifBlank { if (bannerBitmap == null) ad.altText else "" }
+                if (caption.isNotBlank()) {
+                    b.tvAdLabel.visibility = View.VISIBLE
+                    b.tvAdLabel.text = if (ad.name.isNotBlank()) ad.name.uppercase(Locale.getDefault()) else "ПАРТНЕР"
+                    b.tvAdText.visibility = View.VISIBLE
+                    b.tvAdText.text = caption
                     b.btnAdAction.visibility = if (ad.primaryUrl.isNotBlank()) View.VISIBLE else View.GONE
+                } else {
+                    b.tvAdLabel.visibility = View.GONE
+                    b.tvAdText.visibility = View.GONE
+                    b.btnAdAction.visibility = View.GONE
+                }
 
-                    val clickListener = View.OnClickListener {
-                        if (ad.primaryUrl.isNotBlank()) {
-                            executor.execute { api.trackAd("click", region, group) }
-                            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(ad.primaryUrl)))
-                        }
+                val clickListener = View.OnClickListener {
+                    if (ad.primaryUrl.isNotBlank()) {
+                        executor.execute { api.trackAd("click", region, group) }
+                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(ad.primaryUrl)))
                     }
-                    b.btnAdAction.setOnClickListener(clickListener)
-                    b.cardAd.setOnClickListener(clickListener)
+                }
+                b.ivAdBanner.setOnClickListener(clickListener)
+                b.btnAdAction.setOnClickListener(clickListener)
+                b.cardAd.setOnClickListener(clickListener)
 
-                    val trackKey = "${region}_${group}_${ad.text.hashCode()}"
-                    if (lastTrackedAdKey != trackKey) {
-                        lastTrackedAdKey = trackKey
-                        executor.execute { api.trackAd("impression", region, group) }
-                    }
+                val trackKey = "${region}_${group}_${ad.imageUrl.hashCode()}_${ad.text.hashCode()}"
+                if (lastTrackedAdKey != trackKey) {
+                    lastTrackedAdKey = trackKey
+                    executor.execute { api.trackAd("impression", region, group) }
                 }
             }
         }
     }
 
     private fun formatUpdatedDate(iso: String): String {
-        return try {
-            iso.replace("T", " ").take(16)
-        } catch (_: Exception) {
-            iso
+        val patterns = listOf(
+            "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+            "yyyy-MM-dd'T'HH:mm:ss'Z'",
+            "yyyy-MM-dd'T'HH:mm:ssXXX",
+            "yyyy-MM-dd'T'HH:mm:ss"
+        )
+        for (p in patterns) {
+            try {
+                val parser = SimpleDateFormat(p, Locale.US).apply {
+                    if (p.endsWith("'Z'")) {
+                        timeZone = TimeZone.getTimeZone("UTC")
+                    }
+                }
+                val date = parser.parse(iso)
+                if (date != null) {
+                    val out = SimpleDateFormat("dd.MM.yyyy, HH:mm:ss", Locale("uk", "UA"))
+                    return out.format(date)
+                }
+            } catch (_: Exception) {
+            }
         }
+        return iso.replace("T", " ").take(19)
     }
 }

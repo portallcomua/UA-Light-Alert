@@ -40,6 +40,14 @@ class PrefsStore(context: Context) {
         get() = prefs.getString(KEY_CACHED_ADS, "") ?: ""
         set(value) = prefs.edit().putString(KEY_CACHED_ADS, value).apply()
 
+    var lastUpdateCheckMillis: Long
+        get() = prefs.getLong(KEY_LAST_UPDATE_CHECK, 0L)
+        set(value) = prefs.edit().putLong(KEY_LAST_UPDATE_CHECK, value).apply()
+
+    var dismissedUpdateVersion: String
+        get() = prefs.getString(KEY_DISMISSED_UPDATE_VERSION, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_DISMISSED_UPDATE_VERSION, value).apply()
+
     fun saveScheduleJson(region: String, json: String) {
         prefs.edit().putString("schedule_$region", json).apply()
     }
@@ -180,5 +188,7 @@ class PrefsStore(context: Context) {
         private const val KEY_VOICE_RATE_OVERRIDE = "voice_rate_override"
         private const val KEY_QUIET_START_OVERRIDE = "quiet_start_override"
         private const val KEY_QUIET_END_OVERRIDE = "quiet_end_override"
+        private const val KEY_LAST_UPDATE_CHECK = "last_update_check_millis"
+        private const val KEY_DISMISSED_UPDATE_VERSION = "dismissed_update_version"
     }
 }

@@ -1,3 +1,5 @@
+import java.io.File
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -11,23 +13,42 @@ android {
         applicationId = "ua.pp.uaserver.lightalert"
         minSdk = 26
         targetSdk = 35
-        versionCode = 470
-        versionName = "4.7.0"
+        versionCode = 480
+        versionName = "4.8.0"
 
         buildConfigField("String", "SITE_BASE_URL", "\"https://uaserver.pp.ua\"")
+        buildConfigField("String", "GITHUB_REPO", "\"portallcomua/UA-Light-Alert\"")
+    }
+
+    signingConfigs {
+        val ksPath = System.getenv("ANDROID_KEYSTORE_PATH")
+        val ksPass = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+        val ksAlias = System.getenv("ANDROID_KEY_ALIAS")
+        val ksKeyPass = System.getenv("ANDROID_KEY_PASSWORD")
+        if (!ksPath.isNullOrBlank() && !ksPass.isNullOrBlank() && !ksAlias.isNullOrBlank() && !ksKeyPass.isNullOrBlank() && File(ksPath).exists()) {
+            create("release") {
+                storeFile = File(ksPath)
+                storePassword = ksPass
+                keyAlias = ksAlias
+                keyPassword = ksKeyPass
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
+            val releaseSigning = signingConfigs.findByName("release")
+            if (releaseSigning != null) {
+                signingConfig = releaseSigning
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
         }
         debug {
-            applicationIdSuffix = ".debug"
-            versionNameSuffix = "-debug"
+            // Keep identical applicationId so updates from GitHub Releases replace the installed app in-place.
         }
     }
 

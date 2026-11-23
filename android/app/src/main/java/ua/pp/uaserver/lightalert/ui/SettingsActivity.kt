@@ -17,6 +17,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import ua.pp.uaserver.lightalert.alarm.OutageAlarmReceiver
 import ua.pp.uaserver.lightalert.alarm.ScheduleAlarmScheduler
 import ua.pp.uaserver.lightalert.alert.AlertAudioPlayer
 import ua.pp.uaserver.lightalert.data.ApiClient
@@ -24,7 +25,11 @@ import ua.pp.uaserver.lightalert.data.PrefsStore
 import ua.pp.uaserver.lightalert.data.SiteConfig
 import ua.pp.uaserver.lightalert.data.UserOverrides
 import ua.pp.uaserver.lightalert.databinding.ActivitySettingsBinding
+import ua.pp.uaserver.lightalert.update.AppUpdateController
+import ua.pp.uaserver.lightalert.update.AppUpdater
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 import java.util.concurrent.Executors
 
@@ -34,6 +39,7 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var prefs: PrefsStore
     private lateinit var api: ApiClient
     private lateinit var previewPlayer: AlertAudioPlayer
+    private lateinit var updateController: AppUpdateController
 
     private val executor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -87,6 +93,7 @@ class SettingsActivity : AppCompatActivity() {
         prefs = PrefsStore(this)
         api = ApiClient(this, prefs)
         previewPlayer = AlertAudioPlayer(this)
+        updateController = AppUpdateController(this, executor)
 
         b.btnBack.setOnClickListener { finish() }
 
@@ -95,6 +102,11 @@ class SettingsActivity : AppCompatActivity() {
 
         populateUi()
         refreshConfigFromServer()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        updateController.onResume()
     }
 
     override fun onDestroy() {
@@ -119,6 +131,47 @@ class SettingsActivity : AppCompatActivity() {
         b.switchAutoOpen.setOnCheckedChangeListener { _, isChecked ->
             workingOverrides = workingOverrides.copy(autoOpenAlertScreen = isChecked)
             prefs.saveUserOverrides(workingOverrides)
+        }
+
+        b.btnTestAlert.setOnClickListener {
+            val activeGroup = prefs.selectedGroup.ifBlank { "GPV1.1" }
+            val testTime = SimpleDateFormat("HH:mm", Locale.US)
+                .format(Date(System.currentTimeMillis() + 5 * 60_000L))
+            val intent = Intent(this, AlertActivity::class.java).apply {
+                putExtra(OutageAlarmReceiver.EXTRA_TYPE, "off")
+                putExtra(OutageAlarmReceiver.EXTRA_EVENT_TIME_MILLIS, System.currentTimeMillis() + 5 * 60_000L)
+                putExtra(OutageAlarmReceiver.EXTRA_EVENT_TIME_FMT, testTime)
+                putExtra(OutageAlarmReceiver.EXTRA_REGION, prefs.selectedRegion)
+                putExtra(OutageAlarmReceiver.EXTRA_GROUP, activeGroup)
+                putExtra(AlertActivity.EXTRA_AUTO_PLAY, true)
+                putExtra(AlertActivity.EXTRA_IS_TEST, true)
+            }
+            startActivity(intent)
+        }
+
+        b.tvAppVersionInfo.text = "Версія додатка: v. ${updateController.updater.getCurrentVersionName()}"
+        b.btnCheckAppUpdate.setOnClickListener {
+            b.btnCheckAppUpdate.isEnabled = false
+            b.tvUpdateStatus.text = "Перевіряємо GitHub Releases…"
+            executor.execute {
+                val res = updateController.updater.checkForUpdate()
+                mainHandler.post {
+                    b.btnCheckAppUpdate.isEnabled = true
+                    when (res) {
+                        is AppUpdater.CheckResult.UpdateAvailable -> {
+                            b.tvUpdateStatus.text = "Знайдено нову версію v. ${res.info.version}!"
+                            updateController.showUpdateDialog(res.info)
+                        }
+                        is AppUpdater.CheckResult.UpToDate -> {
+                            b.tvUpdateStatus.text = "У вас встановлена остання версія v. ${res.currentVersion}."
+                            Toast.makeText(this, "Оновлень поки немає.", Toast.LENGTH_SHORT).show()
+                        }
+                        is AppUpdater.CheckResult.Error -> {
+                            b.tvUpdateStatus.text = "Помилка перевірки: ${res.message}"
+                        }
+                    }
+                }
+            }
         }
 
         val site = siteConfig.settings

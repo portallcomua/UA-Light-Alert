@@ -1,6 +1,8 @@
 package ua.pp.uaserver.lightalert.data
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import org.json.JSONObject
 import ua.pp.uaserver.lightalert.BuildConfig
 import java.io.File
@@ -204,8 +206,8 @@ class ApiClient(private val context: Context, private val prefs: PrefsStore) {
         )
 
         return SiteConfig(
-            pluginVersion = root.optString("plugin_version", "4.7.0"),
-            siteName = root.optString("site_name", "Графік світла").ifBlank { "Графік світла" },
+            pluginVersion = root.optString("plugin_version", "4.8.0"),
+            siteName = "Графік відключень",
             scheduleUrl = root.optString("schedule_url", "${BuildConfig.SITE_BASE_URL}/svitlo/"),
             regions = if (regions.isNotEmpty()) regions else SiteConfig.defaultRegions(),
             settings = settings,
@@ -213,19 +215,59 @@ class ApiClient(private val context: Context, private val prefs: PrefsStore) {
         )
     }
 
+    fun fetchBitmap(urlStr: String): Bitmap? {
+        if (urlStr.isBlank()) return null
+        return try {
+            val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
+                connectTimeout = 10_000
+                readTimeout = 15_000
+                requestMethod = "GET"
+                instanceFollowRedirects = true
+            }
+            try {
+                if (conn.responseCode in 200..299) {
+                    conn.inputStream.use { BitmapFactory.decodeStream(it) }
+                } else {
+                    null
+                }
+            } finally {
+                conn.disconnect()
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     private fun parseAds(raw: String): List<AdItem> {
         val root = JSONObject(raw)
         val arr = root.optJSONArray("ads") ?: return emptyList()
         val result = mutableListOf<AdItem>()
+        val imgSrcRegex = Regex("""<img[^>]+src=["']([^"']+)["']""", RegexOption.IGNORE_CASE)
+        val imgAltRegex = Regex("""<img[^>]+alt=["']([^"']*)["']""", RegexOption.IGNORE_CASE)
+        val hrefRegex = Regex("""href=["']([^"']+)["']""", RegexOption.IGNORE_CASE)
+
         for (i in 0 until arr.length()) {
             val obj = arr.optJSONObject(i) ?: continue
+            val html = obj.optString("html", "")
             val text = obj.optString("text", "").trim()
-            if (text.isNotBlank()) {
+            val imageUrl = obj.optString("image_url", "").trim().ifBlank {
+                imgSrcRegex.find(html)?.groupValues?.getOrNull(1).orEmpty().trim()
+            }
+            val altText = obj.optString("alt", "").trim().ifBlank {
+                imgAltRegex.find(html)?.groupValues?.getOrNull(1).orEmpty().trim()
+            }
+            val primaryUrl = obj.optString("primary_url", "").trim().ifBlank {
+                hrefRegex.find(html)?.groupValues?.getOrNull(1).orEmpty().trim()
+            }
+
+            if (imageUrl.isNotBlank() || text.isNotBlank() || altText.isNotBlank()) {
                 result.add(
                     AdItem(
                         name = obj.optString("name", ""),
                         text = text,
-                        primaryUrl = obj.optString("primary_url", "")
+                        imageUrl = imageUrl,
+                        altText = altText,
+                        primaryUrl = primaryUrl
                     )
                 )
             }
@@ -304,20 +346,31 @@ class ApiClient(private val context: Context, private val prefs: PrefsStore) {
             }
         }
 
-        fun buildHourRows(groupObj: JSONObject?): List<HourSlotRow> {
+        fun buildHalfHourRows(groupObj: JSONObject?): List<HalfHourSlotRow> {
             if (groupObj == null) return emptyList()
-            val currentHour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
-            val rows = mutableListOf<HourSlotRow>()
-            for (h in 0 until 24) {
-                val key = (h + 1).toString()
-                val raw = groupObj.optString(key, "")
+            val cal = Calendar.getInstance()
+            val currentSlot = cal.get(Calendar.HOUR_OF_DAY) * 2 + if (cal.get(Calendar.MINUTE) >= 30) 1 else 0
+            val rows = mutableListOf<HalfHourSlotRow>()
+            for (slot in 0 until 48) {
+                val hourKey = ((slot / 2) + 1).toString()
+                val raw = groupObj.optString(hourKey, "")
+                val half = slot % 2
+                val startMinutes = slot * 30
+                val endMinutes = (startMinutes + 30) % 1440
+                val range = String.format(
+                    Locale.US,
+                    "%02d:%02d — %02d:%02d",
+                    startMinutes / 60,
+                    startMinutes % 60,
+                    endMinutes / 60,
+                    endMinutes % 60
+                )
                 rows.add(
-                    HourSlotRow(
-                        hourIndex = h,
-                        timeLabel = String.format(Locale.US, "%02d:00", h),
-                        firstHalfStatus = normalizeHalfHourStatus(raw, 0),
-                        secondHalfStatus = normalizeHalfHourStatus(raw, 1),
-                        isCurrentHour = (h == currentHour)
+                    HalfHourSlotRow(
+                        slotIndex = slot,
+                        timeRangeLabel = range,
+                        status = normalizeHalfHourStatus(raw, half),
+                        isCurrentSlot = (slot == currentSlot)
                     )
                 )
             }

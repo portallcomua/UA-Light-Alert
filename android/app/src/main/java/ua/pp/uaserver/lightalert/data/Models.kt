@@ -36,8 +36,8 @@ data class ProStatus(
 )
 
 data class SiteConfig(
-    val pluginVersion: String = "4.7.0",
-    val siteName: String = "Графік світла",
+    val pluginVersion: String = "4.8.0",
+    val siteName: String = "Графік відключень",
     val scheduleUrl: String = "https://uaserver.pp.ua/svitlo/",
     val regions: List<RegionItem> = defaultRegions(),
     val settings: SiteAlertSettings = SiteAlertSettings(),
@@ -58,6 +58,8 @@ data class SiteConfig(
 data class AdItem(
     val name: String,
     val text: String,
+    val imageUrl: String,
+    val altText: String,
     val primaryUrl: String
 )
 
@@ -94,12 +96,11 @@ data class EffectiveAlertSettings(
     val quietEnd: String
 )
 
-data class HourSlotRow(
-    val hourIndex: Int, // 0..23
-    val timeLabel: String, // "00:00"
-    val firstHalfStatus: String?, // "yes" | "no" | null
-    val secondHalfStatus: String?, // "yes" | "no" | null
-    val isCurrentHour: Boolean
+data class HalfHourSlotRow(
+    val slotIndex: Int, // 0..47
+    val timeRangeLabel: String, // "00:00 — 00:30"
+    val status: String?, // "yes" | "no" | null
+    val isCurrentSlot: Boolean
 )
 
 data class NextOutageEvent(

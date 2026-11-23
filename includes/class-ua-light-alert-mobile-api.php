@@ -213,8 +213,8 @@ final class UA_Light_Alert_Mobile_API {
         $schedule_url = $schedule_page ? get_permalink($schedule_page) : (get_option('ua_light_schedule_page_url', '') ?: home_url('/'));
 
         return new WP_REST_Response([
-            'plugin_version' => $plugin_data['Version'] ?? '4.7.0',
-            'site_name'      => get_bloginfo('name'),
+            'plugin_version' => $plugin_data['Version'] ?? '4.8.0',
+            'site_name'      => 'Графік відключень',
             'schedule_url'   => $schedule_url,
             'regions'        => self::get_regions(),
             'settings'       => [
@@ -331,10 +331,20 @@ final class UA_Light_Alert_Mobile_API {
             if (preg_match('/href=["\']([^"\']+)["\']/i', $html, $m)) {
                 $primary_url = esc_url_raw(html_entity_decode($m[1], ENT_QUOTES, 'UTF-8'));
             }
+            $image_url = '';
+            if (preg_match('/<img[^>]+src=["\']([^"\']+)["\']/i', $html, $imgMatch)) {
+                $image_url = esc_url_raw(html_entity_decode($imgMatch[1], ENT_QUOTES, 'UTF-8'));
+            }
+            $alt_text = '';
+            if (preg_match('/<img[^>]+alt=["\']([^"\']*)["\']/i', $html, $altMatch)) {
+                $alt_text = trim(html_entity_decode($altMatch[1], ENT_QUOTES, 'UTF-8'));
+            }
             $items[] = [
                 'name'        => (string) ($ad['name'] ?? ''),
                 'html'        => $html,
                 'text'        => trim(wp_strip_all_tags($html)),
+                'image_url'   => $image_url,
+                'alt'         => $alt_text,
                 'primary_url' => $primary_url,
             ];
         }

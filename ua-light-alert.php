@@ -2,7 +2,7 @@
 /**
  * Plugin Name: UA Light Alert
  * Description: Графіки відключень, CRM рекламодавців та сповіщення про зміни електропостачання.
- * Version: 4.8.0
+ * Version: 4.8.1
  * Plugin URI: https://uaserver.pp.ua/svitlo/
  * Update URI: https://github.com/portallcomua/UA-Light-Alert
  * Author: UAServer
@@ -49,7 +49,7 @@ final class UA_Light_Alert {
                 require_once ABSPATH . 'wp-includes/functions.php';
             }
             $data = get_file_data(__FILE__, ['Version' => 'Version']);
-            $version = !empty($data['Version']) ? $data['Version'] : '4.8.0';
+            $version = !empty($data['Version']) ? $data['Version'] : '4.8.1';
         }
         return $version;
     }

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: UA Light Alert
  * Description: Графіки відключень, CRM рекламодавців та сповіщення про зміни електропостачання.
- * Version: 4.7.0
+ * Version: 4.8.0
  * Plugin URI: https://uaserver.pp.ua/svitlo/
  * Update URI: https://github.com/portallcomua/UA-Light-Alert
  * Author: UAServer
@@ -40,6 +40,18 @@ final class UA_Light_Alert {
         add_action('wp_ajax_nopriv_ua_get_ads', 'ua_light_get_ads');
 
         add_action('wp_ajax_ua_upload_voice_audio', [$this, 'ajax_upload_voice_audio']);
+    }
+
+    public static function get_plugin_version() {
+        static $version = null;
+        if ($version === null) {
+            if (!function_exists('get_file_data')) {
+                require_once ABSPATH . 'wp-includes/functions.php';
+            }
+            $data = get_file_data(__FILE__, ['Version' => 'Version']);
+            $version = !empty($data['Version']) ? $data['Version'] : '4.8.0';
+        }
+        return $version;
     }
 
 
@@ -100,10 +112,8 @@ final class UA_Light_Alert {
                 ['src' => $icon_base_url . 'ua-light-alert-icon-512.png', 'sizes' => '512x512', 'type' => 'image/png', 'purpose' => 'any'],
                 ['src' => $icon_base_url . 'ua-light-alert-icon-maskable-512.png', 'sizes' => '512x512', 'type' => 'image/png', 'purpose' => 'maskable'],
             ];
-            $blog_name = trim((string) get_bloginfo('name'));
-            $app_name = $blog_name ? ('Графік відключень — ' . $blog_name) : 'Графік відключень';
             $manifest = [
-                'name' => $app_name,
+                'name' => 'Графік світла',
                 'short_name' => 'Графік світла',
                 'lang' => 'uk',
                 'dir' => 'ltr',
@@ -638,7 +648,7 @@ JS;
         $edit_ad = ($edit_id >= 0 && isset($ads[$edit_id])) ? $ads[$edit_id] : null;
         ?>
         <div class="wrap">
-            <h1>Графік світла — Налаштування та рекламодавці</h1>
+            <h1>Графік відключень v. <?php echo esc_html(self::get_plugin_version()); ?> — Налаштування та рекламодавці</h1>
             <div class="notice notice-info">
                 <p><strong>Фонові сповіщення:</strong> активних push-підписок — <?php echo absint($push_count); ?>.
                 Плагін сам створює щохвилинне завдання WordPress — окремо налаштовувати його в адмінці не потрібно.</p>
@@ -1304,6 +1314,9 @@ JS;
         <div id="ua-light-widget" class="ua-light-widget">
             <audio id="ua-alert-sound" preload="none"></audio>
 
+            <h2 class="ua-widget-title">Графік відключень v. <?php echo esc_html(self::get_plugin_version()); ?></h2>
+            <div id="ua-ad-slot" class="ua-ad-slot" style="display:none;"></div>
+
             <div class="ua-controls">
                 <label class="ua-field">
                     <strong>Область:</strong>
@@ -1359,7 +1372,6 @@ JS;
 
             <div id="ua-notice" class="ua-notice" style="display:none;"></div>
             <div id="ua-result" class="ua-result"></div>
-            <div id="ua-ad-slot" class="ua-ad-slot"></div>
         </div>
 
         <style>
@@ -1372,6 +1384,12 @@ JS;
                 background: #fff;
                 color: #222;
                 font-family: Arial, sans-serif;
+            }
+            .ua-widget-title {
+                margin: 0 0 12px 0;
+                font-size: 20px;
+                font-weight: 700;
+                color: #1c1917;
             }
             .ua-light-widget * { box-sizing: border-box; }
             .ua-pwa-install-wrap { margin: 14px 0 4px; }
@@ -1485,7 +1503,8 @@ JS;
                 border: 1px solid #ddd;
             }
             .ua-result th { background: #f3f3f3; }
-            .ua-ad-slot { margin-top: 20px; }
+            .ua-ad-slot { margin: 0 0 16px 0; }
+            .ua-ad-slot img { max-width: 100%; height: auto; display: block; margin: 0 auto; border-radius: 6px; }
             @media (max-width: 480px) {
                 .ua-light-widget { padding: 10px; }
                 .ua-result table { font-size: 12px; }
@@ -2371,14 +2390,27 @@ JS;
                     return response.text();
                 })
                 .then(function(html) {
-                    adSlot.innerHTML = html;
-
                     if (html.indexOf('ua-ad-item') !== -1) {
+                        adSlot.innerHTML = html;
+                        adSlot.style.display = 'block';
                         trackAd('impression', region, group);
+                    } else {
+                        adSlot.innerHTML = '';
+                        adSlot.style.display = 'none';
                     }
                 })
                 .catch(function() {
                     adSlot.innerHTML = '';
+                    adSlot.style.display = 'none';
+                });
+            }
+
+            if (adSlot) {
+                adSlot.addEventListener('click', function(e) {
+                    var link = e.target && e.target.closest ? e.target.closest('a') : null;
+                    if (link) {
+                        trackAd('click', activeRegion || '', activeGroup || '');
+                    }
                 });
             }
 
@@ -2404,6 +2436,7 @@ JS;
             // Register the worker as soon as the schedule page loads, so the browser can
             // evaluate PWA installability before the visitor presses the install button.
             registerPwaServiceWorker();
+            loadAds('', '');
             readSelection();
         })();
         </script>
@@ -2504,7 +2537,10 @@ final class UA_Light_Alert_GitHub_Updater {
     const REPOSITORY = 'portallcomua/UA-Light-Alert';
     const SLUG = 'ua-light-alert';
     const CACHE_KEY = 'ua_light_alert_github_release_v2';
+    const CACHE_FALLBACK_KEY = 'ua_light_alert_github_release_fallback_v2';
+    const LAST_CHECK_KEY = 'ua_light_alert_github_last_check_v2';
     const CACHE_TTL = 300;
+    const FALLBACK_TTL = 43200;
 
     private $plugin_file;
 
@@ -2514,22 +2550,55 @@ final class UA_Light_Alert_GitHub_Updater {
         // Required for plugins that declare a custom Update URI (WordPress 5.8+).
         add_filter('update_plugins_github.com', [$this, 'filter_github_update'], 10, 4);
 
-        // Compatibility path for older WordPress versions.
+        // Compatibility path for WordPress update transients.
         add_filter('pre_set_site_transient_update_plugins', [$this, 'filter_update_transient']);
-        // Also inject when WordPress reads the cached update list (Plugins screen).
         add_filter('site_transient_update_plugins', [$this, 'filter_site_update_transient']);
 
         add_filter('plugins_api', [$this, 'plugin_information'], 20, 3);
         add_filter('upgrader_source_selection', [$this, 'normalize_package_directory'], 10, 4);
+        add_filter('http_request_args', [$this, 'filter_github_http_args'], 10, 2);
+        add_action('upgrader_process_complete', [$this, 'clear_update_cache_after_upgrade'], 10, 2);
 
-        // Force a fresh GitHub release check whenever the administrator opens
-        // Plugins. This avoids WordPress keeping a stale update transient and
-        // makes the update appear on the very page where it is expected.
+        // Refresh GitHub release info cleanly when admin opens Plugins or runs force-check.
         add_action('load-plugins.php', [$this, 'refresh_update_check']);
+        add_action('load-update-core.php', [$this, 'refresh_update_check_on_force']);
     }
 
-    public function refresh_update_check() {
+    public function filter_github_http_args($args, $url) {
+        $host = wp_parse_url($url, PHP_URL_HOST);
+        if (is_string($host) && (
+            $host === 'github.com'
+            || $host === 'api.github.com'
+            || substr($host, -22) === '.githubusercontent.com'
+        )) {
+            if (empty($args['headers']) || !is_array($args['headers'])) {
+                $args['headers'] = [];
+            }
+            if (empty($args['headers']['User-Agent'])) {
+                $args['headers']['User-Agent'] = 'UA-Light-Alert-WordPress-Updater/' . UA_Light_Alert::get_plugin_version();
+            }
+            if (empty($args['timeout']) || (int) $args['timeout'] < 30) {
+                $args['timeout'] = 30;
+            }
+        }
+        return $args;
+    }
+
+    public function refresh_update_check_on_force() {
+        if (!empty($_GET['force-check'])) {
+            $this->refresh_update_check(true);
+        }
+    }
+
+    public function refresh_update_check($force_bypass_cooldown = false) {
         if (!current_user_can('update_plugins')) {
+            return;
+        }
+
+        // Do not wipe cache during an inline update request or within 60s cooldown unless force-check=1.
+        $is_force = $force_bypass_cooldown || !empty($_GET['force-check']);
+        $last_check = (int) get_transient(self::LAST_CHECK_KEY);
+        if (!$is_force && $last_check > 0 && (time() - $last_check) < 60) {
             return;
         }
 
@@ -2537,9 +2606,9 @@ final class UA_Light_Alert_GitHub_Updater {
             require_once ABSPATH . 'wp-includes/update.php';
         }
 
+        set_transient(self::LAST_CHECK_KEY, time(), 60);
         delete_transient(self::CACHE_KEY);
 
-        // Reset only the update-check timestamp, preserving other plugin data.
         $stored = get_site_option('_site_transient_update_plugins');
         if (is_object($stored)) {
             $stored->last_checked = 0;
@@ -2547,6 +2616,27 @@ final class UA_Light_Alert_GitHub_Updater {
         }
 
         wp_update_plugins();
+    }
+
+    public function clear_update_cache_after_upgrade($upgrader, $hook_extra) {
+        $type = isset($hook_extra['type']) ? $hook_extra['type'] : '';
+        if ('plugin' !== $type) {
+            return;
+        }
+
+        $matches = false;
+        if (!empty($hook_extra['plugin']) && $hook_extra['plugin'] === $this->plugin_file) {
+            $matches = true;
+        } elseif (!empty($hook_extra['plugins']) && is_array($hook_extra['plugins']) && in_array($this->plugin_file, $hook_extra['plugins'], true)) {
+            $matches = true;
+        }
+
+        if ($matches) {
+            delete_transient(self::CACHE_KEY);
+            delete_transient(self::CACHE_FALLBACK_KEY);
+            delete_transient(self::LAST_CHECK_KEY);
+            delete_site_transient('update_plugins');
+        }
     }
 
     private function get_release($force = false) {
@@ -2560,16 +2650,21 @@ final class UA_Light_Alert_GitHub_Updater {
         $response = wp_remote_get(
             'https://api.github.com/repos/' . self::REPOSITORY . '/releases/latest',
             [
-                'timeout' => 12,
+                'timeout' => 15,
                 'headers' => [
                     'Accept' => 'application/vnd.github+json',
-                    'User-Agent' => 'UA-Light-Alert-WordPress-Updater',
+                    'User-Agent' => 'UA-Light-Alert-WordPress-Updater/' . UA_Light_Alert::get_plugin_version(),
                     'X-GitHub-Api-Version' => '2022-11-28',
                 ],
             ]
         );
 
         if (is_wp_error($response) || 200 !== (int) wp_remote_retrieve_response_code($response)) {
+            $fallback = get_transient(self::CACHE_FALLBACK_KEY);
+            if (is_array($fallback) && !empty($fallback['tag_name'])) {
+                set_transient(self::CACHE_KEY, $fallback, 120);
+                return $fallback;
+            }
             return false;
         }
 
@@ -2579,14 +2674,22 @@ final class UA_Light_Alert_GitHub_Updater {
         }
 
         set_transient(self::CACHE_KEY, $release, self::CACHE_TTL);
+        set_transient(self::CACHE_FALLBACK_KEY, $release, self::FALLBACK_TTL);
         return $release;
     }
 
     private function get_release_package($release, $version) {
-        $asset_name = self::SLUG . '-' . $version . '.zip';
+        $exact_asset_name = self::SLUG . '-' . $version . '.zip';
         if (!empty($release['assets']) && is_array($release['assets'])) {
             foreach ($release['assets'] as $asset) {
-                if (!empty($asset['name']) && $asset['name'] === $asset_name && !empty($asset['browser_download_url'])) {
+                if (!empty($asset['name']) && $asset['name'] === $exact_asset_name && !empty($asset['browser_download_url'])) {
+                    return esc_url_raw($asset['browser_download_url']);
+                }
+            }
+            foreach ($release['assets'] as $asset) {
+                if (!empty($asset['name'])
+                    && preg_match('/^' . preg_quote(self::SLUG, '/') . '-.*\.zip$/i', $asset['name'])
+                    && !empty($asset['browser_download_url'])) {
                     return esc_url_raw($asset['browser_download_url']);
                 }
             }
@@ -2596,6 +2699,14 @@ final class UA_Light_Alert_GitHub_Updater {
             : 'https://github.com/' . self::REPOSITORY . '/archive/refs/tags/' . rawurlencode($release['tag_name']) . '.zip';
     }
 
+    private function get_installed_version() {
+        if (!function_exists('get_file_data')) {
+            require_once ABSPATH . 'wp-includes/functions.php';
+        }
+        $plugin_data = get_file_data(__FILE__, ['Version' => 'Version']);
+        return isset($plugin_data['Version']) && $plugin_data['Version'] !== '' ? $plugin_data['Version'] : '0';
+    }
+
     private function get_update_object() {
         $release = $this->get_release();
         if (!$release) {
@@ -2603,8 +2714,7 @@ final class UA_Light_Alert_GitHub_Updater {
         }
 
         $version = ltrim((string) $release['tag_name'], "vV");
-        $plugin_data = get_file_data(__FILE__, ['Version' => 'Version']);
-        $installed_version = isset($plugin_data['Version']) ? $plugin_data['Version'] : '0';
+        $installed_version = $this->get_installed_version();
 
         if (!preg_match('/^\d+(?:\.\d+){1,3}(?:[-+][A-Za-z0-9.-]+)?$/', $version)
             || !version_compare($version, $installed_version, '>')) {
@@ -2621,7 +2731,7 @@ final class UA_Light_Alert_GitHub_Updater {
             'new_version' => $version,
             'url' => 'https://github.com/' . self::REPOSITORY,
             'package' => $package,
-            'tested' => '',
+            'tested' => get_bloginfo('version'),
             'requires' => '5.8',
             'requires_php' => '7.4',
             'icons' => [],
@@ -2669,39 +2779,69 @@ final class UA_Light_Alert_GitHub_Updater {
         return $transient;
     }
 
-
-
     /**
-     * GitHub's generated ZIP has a commit-suffixed root folder. Rename only
-     * this plugin's extracted package to the currently installed directory
-     * so WordPress updates in place instead of creating a duplicate plugin.
+     * Normalize the extracted package root directory to the installed plugin
+     * folder and always return a trailing slash (required by WP_Upgrader).
      */
     public function normalize_package_directory($source, $remote_source, $upgrader, $hook_extra) {
-        if (empty($hook_extra['plugin']) || $hook_extra['plugin'] !== $this->plugin_file) {
+        if (is_wp_error($source)) {
             return $source;
         }
+
+        $is_target_plugin = false;
+        if (!empty($hook_extra['plugin']) && $hook_extra['plugin'] === $this->plugin_file) {
+            $is_target_plugin = true;
+        } elseif (!empty($hook_extra['plugins']) && is_array($hook_extra['plugins']) && in_array($this->plugin_file, $hook_extra['plugins'], true)) {
+            $is_target_plugin = true;
+        }
+
+        if (!$is_target_plugin) {
+            return $source;
+        }
+
+        global $wp_filesystem;
 
         $expected_dir = dirname($this->plugin_file);
         if ('.' === $expected_dir || '' === $expected_dir) {
             $expected_dir = self::SLUG;
         }
 
-        $source = untrailingslashit($source);
-        $parent = dirname($source);
+        $source_clean = untrailingslashit($source);
+
+        // Unwrap nested directory if archive extracted an extra outer wrapper folder.
+        if (!file_exists($source_clean . '/ua-light-alert.php')
+            && file_exists($source_clean . '/' . $expected_dir . '/ua-light-alert.php')) {
+            $source_clean = $source_clean . '/' . $expected_dir;
+        }
+
+        $parent = dirname($source_clean);
         $target = trailingslashit($parent) . $expected_dir;
 
-        if (basename($source) === $expected_dir) {
-            return $source;
+        if (basename($source_clean) === $expected_dir && $source_clean === $target) {
+            return trailingslashit($source_clean);
         }
 
         if (is_dir($target)) {
-            return new WP_Error(
-                'ua_light_alert_update_directory_conflict',
-                'Не вдалося оновити UA Light Alert: у тимчасовому каталозі вже існує папка призначення.'
-            );
+            if ($wp_filesystem && method_exists($wp_filesystem, 'delete')) {
+                $wp_filesystem->delete(trailingslashit($target), true);
+            }
+            if (is_dir($target)) {
+                return new WP_Error(
+                    'ua_light_alert_update_directory_conflict',
+                    'Не вдалося оновити UA Light Alert: у тимчасовому каталозі вже існує папка призначення.'
+                );
+            }
         }
 
-        if (!@rename($source, $target)) {
+        $moved = false;
+        if ($wp_filesystem && method_exists($wp_filesystem, 'move')) {
+            $moved = $wp_filesystem->move($source_clean, $target, true);
+        }
+        if (!$moved) {
+            $moved = @rename($source_clean, $target);
+        }
+
+        if (!$moved) {
             return new WP_Error(
                 'ua_light_alert_update_directory_rename_failed',
                 'Не вдалося підготувати архів UA Light Alert для оновлення.'

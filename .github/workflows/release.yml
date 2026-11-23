@@ -15,6 +15,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 2
+
       - name: Detect plugin version change
         id: version
         shell: bash
@@ -31,6 +32,7 @@ jobs:
           else
             echo "publish=false" >> "$GITHUB_OUTPUT"
           fi
+
       - name: Build installable plugin ZIP
         if: steps.version.outputs.publish == 'true'
         run: |
@@ -38,6 +40,58 @@ jobs:
           rsync -a --exclude='.git' --exclude='.github' --exclude='dist' --exclude='tests' --exclude='android' ./ dist/ua-light-alert/
           cd dist
           zip -qr "ua-light-alert-${{ steps.version.outputs.version }}.zip" ua-light-alert
+
+      - name: Set up JDK 17
+        if: steps.version.outputs.publish == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Configure Android SDK 35
+        if: steps.version.outputs.publish == 'true'
+        shell: bash
+        run: |
+          SDK_DIR="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          echo "ANDROID_HOME=$SDK_DIR" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_DIR" >> "$GITHUB_ENV"
+          SDKMANAGER="$SDK_DIR/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Cache debug keystore for update compatibility
+        if: steps.version.outputs.publish == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: android-debug-keystore-v1
+
+      - name: Set up Gradle 8.9
+        if: steps.version.outputs.publish == 'true'
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build Android APK
+        if: steps.version.outputs.publish == 'true'
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          mkdir -p dist
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ] && [ -n "$ANDROID_KEYSTORE_PASSWORD" ] && [ -n "$ANDROID_KEY_ALIAS" ] && [ -n "$ANDROID_KEY_PASSWORD" ]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            export ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/release.keystore"
+            gradle -p android assembleRelease --no-daemon
+            cp android/app/build/outputs/apk/release/app-release.apk dist/ua-light-alert.apk
+          else
+            gradle -p android assembleDebug --no-daemon
+            cp android/app/build/outputs/apk/debug/app-debug.apk dist/ua-light-alert.apk
+          fi
+
       - name: Publish GitHub Release
         if: steps.version.outputs.publish == 'true'
         uses: softprops/action-gh-release@v2
@@ -45,4 +99,6 @@ jobs:
           tag_name: v${{ steps.version.outputs.version }}
           name: UA Light Alert ${{ steps.version.outputs.version }}
           generate_release_notes: true
-          files: dist/ua-light-alert-${{ steps.version.outputs.version }}.zip
+          files: |
+            dist/ua-light-alert-${{ steps.version.outputs.version }}.zip
+            dist/ua-light-alert.apk

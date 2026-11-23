@@ -34,7 +34,7 @@ jobs:
           VERSION="$(grep -m1 'Version:' ua-light-alert.php | cut -d ':' -f2 | tr -d '[:space:]')"
           test -n "$VERSION"
           mkdir -p dist/ua-light-alert
-          rsync -a --exclude='.git' --exclude='.github' --exclude='dist' ./ dist/ua-light-alert/
+          rsync -a --exclude='.git' --exclude='.github' --exclude='dist' --exclude='android' ./ dist/ua-light-alert/
           cd dist
           zip -qr "ua-light-alert-$VERSION.zip" ua-light-alert
           echo "PLUGIN_VERSION=$VERSION" >> "$GITHUB_ENV"

@@ -367,7 +367,6 @@ function formatUkrainianTime(hh, mm, withPreposition) {
 function normalizeUkrainianSpeechText(rawText, eventTime, groupLabel) {
     var text = String(rawText || '').trim();
     var cleanGroup = String(groupLabel || '').replace(/^GPV/i, '').trim();
-    var hadTimeRef = /\{time\}/i.test(text) || /\b(?:[01]?\d|2[0-3]):[0-5]\d\b/.test(text);
 
     if (eventTime) {
         text = text.replace(/\{time\}/gi, eventTime);
@@ -376,15 +375,6 @@ function normalizeUkrainianSpeechText(rawText, eventTime, groupLabel) {
         text = text.replace(/\{group\}/gi, cleanGroup);
     } else {
         text = text.replace(/\{group\}/gi, '');
-    }
-
-    if (eventTime && !hadTimeRef) {
-        var parts = eventTime.split(':');
-        var eh = parseInt(parts[0], 10);
-        var em = parseInt(parts[1], 10);
-        if (!isNaN(eh) && !isNaN(em)) {
-            text = text.replace(/[.\s]+$/, '') + ', орієнтовно ' + formatUkrainianTime(eh, em, true) + '.';
-        }
     }
 
     text = text.replace(/(^|[\s,(])(о|об)\s+([01]?\d|2[0-3]):([0-5]\d)\b/gi, function(_, prefix, prepWord, hStr, mStr) {
@@ -1068,7 +1058,9 @@ JS;
                             var rate = parseFloat($('#ua-light-voice-rate').val() || '0.95');
                             var pitch = parseFloat($('#ua-light-voice-pitch').val() || '1');
                             var volume = Math.max(0, Math.min(100, parseInt($('#ua-light-voice-volume').val() || '80', 10))) / 100;
-                            var normalized = normalizeUkrainianSpeechText(text, '20:00', '3.1');
+                            var sampleDate = new Date(Date.now() + 5 * 60000);
+                            var sampleTime = String(sampleDate.getHours()).padStart(2, '0') + ':' + String(sampleDate.getMinutes()).padStart(2, '0');
+                            var normalized = normalizeUkrainianSpeechText(text, sampleTime, '3.1');
                             $('#ua-light-voice-preview-note').text('Текст для озвучення: «' + normalized + '»');
 
                             speakUkrainianText(normalized, {

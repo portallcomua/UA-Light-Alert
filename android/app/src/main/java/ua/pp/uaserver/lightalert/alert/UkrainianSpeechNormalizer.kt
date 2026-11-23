@@ -71,22 +71,11 @@ object UkrainianSpeechNormalizer {
     fun normalize(rawText: String, eventTime: String, groupLabel: String): String {
         var text = rawText.trim()
         val cleanGroup = groupLabel.replace(Regex("^GPV", RegexOption.IGNORE_CASE), "").trim()
-        val hadTimeRef = Regex("\\{time\\}", RegexOption.IGNORE_CASE).containsMatchIn(text) ||
-            Regex("\\b(?:[01]?\\d|2[0-3]):[0-5]\\d\\b").containsMatchIn(text)
 
         if (eventTime.isNotBlank()) {
             text = text.replace(Regex("\\{time\\}", RegexOption.IGNORE_CASE), eventTime)
         }
         text = text.replace(Regex("\\{group\\}", RegexOption.IGNORE_CASE), cleanGroup)
-
-        if (eventTime.isNotBlank() && !hadTimeRef) {
-            val parts = eventTime.split(":")
-            val eh = parts.getOrNull(0)?.toIntOrNull()
-            val em = parts.getOrNull(1)?.toIntOrNull()
-            if (eh != null && em != null) {
-                text = text.trimEnd('.', ' ') + ", орієнтовно ${formatTime(eh, em, true)}."
-            }
-        }
 
         val prepTimeRegex = Regex(
             "(^|[\\s,(])(о|об)\\s+([01]?\\d|2[0-3]):([0-5]\\d)\\b",

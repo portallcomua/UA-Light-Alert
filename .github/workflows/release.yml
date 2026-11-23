@@ -35,7 +35,7 @@ jobs:
         if: steps.version.outputs.publish == 'true'
         run: |
           mkdir -p dist/ua-light-alert
-          rsync -a --exclude='.git' --exclude='.github' --exclude='dist' --exclude='tests' ./ dist/ua-light-alert/
+          rsync -a --exclude='.git' --exclude='.github' --exclude='dist' --exclude='tests' --exclude='android' ./ dist/ua-light-alert/
           cd dist
           zip -qr "ua-light-alert-${{ steps.version.outputs.version }}.zip" ua-light-alert
       - name: Publish GitHub Release

@@ -37,7 +37,7 @@
                         android:id="@+id/tvSiteTitle"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Графік відключень v. 4.8.0"
+                        android:text="Графік відключень v. 4.8.1"
                         android:textColor="@color/ink_primary"
                         android:textSize="18sp"
                         android:textStyle="bold" />

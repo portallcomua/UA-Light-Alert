@@ -36,7 +36,7 @@ data class ProStatus(
 )
 
 data class SiteConfig(
-    val pluginVersion: String = "4.8.0",
+    val pluginVersion: String = "4.8.1",
     val siteName: String = "Графік відключень",
     val scheduleUrl: String = "https://uaserver.pp.ua/svitlo/",
     val regions: List<RegionItem> = defaultRegions(),

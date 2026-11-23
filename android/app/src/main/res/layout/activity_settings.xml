@@ -190,7 +190,7 @@
                     android:id="@+id/tvAppVersionInfo"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Версія додатка: v. 4.8.0"
+                    android:text="Версія додатка: v. 4.8.1"
                     android:textColor="@color/ink_primary"
                     android:textSize="14sp"
                     android:textStyle="bold" />

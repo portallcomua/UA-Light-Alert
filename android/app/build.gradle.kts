@@ -13,8 +13,8 @@ android {
         applicationId = "ua.pp.uaserver.lightalert"
         minSdk = 26
         targetSdk = 35
-        versionCode = 480
-        versionName = "4.8.0"
+        versionCode = 481
+        versionName = "4.8.1"
 
         buildConfigField("String", "SITE_BASE_URL", "\"https://uaserver.pp.ua\"")
         buildConfigField("String", "GITHUB_REPO", "\"portallcomua/UA-Light-Alert\"")

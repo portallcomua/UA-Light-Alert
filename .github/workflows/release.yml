@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -27,7 +28,8 @@ jobs:
             exit 1
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          if [ "$VERSION" != "$PREVIOUS_VERSION" ]; then
+          ANDROID_CHANGED="$(git diff --name-only HEAD^ HEAD 2>/dev/null | grep -E '^(android/|\.github/workflows/release\.yml$)' || true)"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "$VERSION" != "$PREVIOUS_VERSION" ] || [ -n "$ANDROID_CHANGED" ]; then
             echo "publish=true" >> "$GITHUB_OUTPUT"
           else
             echo "publish=false" >> "$GITHUB_OUTPUT"

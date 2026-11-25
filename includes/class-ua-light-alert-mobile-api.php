@@ -213,7 +213,7 @@ final class UA_Light_Alert_Mobile_API {
         $schedule_url = $schedule_page ? get_permalink($schedule_page) : (get_option('ua_light_schedule_page_url', '') ?: home_url('/'));
 
         return new WP_REST_Response([
-            'plugin_version' => $plugin_data['Version'] ?? '4.8.1',
+            'plugin_version' => $plugin_data['Version'] ?? '4.9.0',
             'site_name'      => 'Графік відключень',
             'schedule_url'   => $schedule_url,
             'regions'        => self::get_regions(),

@@ -36,7 +36,7 @@ data class ProStatus(
 )
 
 data class SiteConfig(
-    val pluginVersion: String = "4.8.1",
+    val pluginVersion: String = "4.9.0",
     val siteName: String = "Графік відключень",
     val scheduleUrl: String = "https://uaserver.pp.ua/svitlo/",
     val regions: List<RegionItem> = defaultRegions(),
@@ -65,15 +65,16 @@ data class AdItem(
 
 data class UserOverrides(
     val autoOpenAlertScreen: Boolean = true,
-    val noticeMinutesOverride: Int = -1, // -1 = use site setting
-    val alertModeOverride: String = "",  // "" = use site setting
+    val noticeMinutesOverride: Int = -1, // -1 = standard app/site setting
+    val alertSourceMode: String = "standard", // "standard" | "mp3" | "tts"
+    val alertModeOverride: String = "",
     val customOffAudioUri: String = "",
     val customOnAudioUri: String = "",
     val customOffAudioLabel: String = "",
     val customOnAudioLabel: String = "",
     val customVoiceTextOff: String = "",
     val customVoiceTextOn: String = "",
-    val voiceRateOverride: Float = -1f, // < 0 = use site setting
+    val voiceRateOverride: Float = -1f, // < 0 = standard
     val quietStartOverride: String = "",
     val quietEndOverride: String = ""
 )

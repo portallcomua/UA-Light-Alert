@@ -17,6 +17,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import ua.pp.uaserver.lightalert.R
 import ua.pp.uaserver.lightalert.alarm.OutageAlarmReceiver
 import ua.pp.uaserver.lightalert.alarm.ScheduleAlarmScheduler
 import ua.pp.uaserver.lightalert.alert.AlertAudioPlayer
@@ -46,13 +47,13 @@ class SettingsActivity : AppCompatActivity() {
 
     private var siteConfig: SiteConfig = SiteConfig()
     private var workingOverrides: UserOverrides = UserOverrides()
+    private var suppressingSourceRadio = false
 
     private var mediaRecorder: MediaRecorder? = null
     private var recordingKind: String? = null // "off" | "on"
     private var pendingRecordKind: String? = null
 
     private val noticeValues = listOf(-1, 1, 3, 5, 10, 15, 30)
-    private val modeValues = listOf("", "both", "speech", "audio")
 
     private val pickOffAudioLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -134,6 +135,8 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         b.btnTestAlert.setOnClickListener {
+            collectFormIntoOverrides()
+            prefs.saveUserOverrides(workingOverrides)
             val activeGroup = prefs.selectedGroup.ifBlank { "GPV1.1" }
             val testTime = SimpleDateFormat("HH:mm", Locale.US)
                 .format(Date(System.currentTimeMillis() + 5 * 60_000L))
@@ -152,7 +155,7 @@ class SettingsActivity : AppCompatActivity() {
         b.tvAppVersionInfo.text = "Версія додатка: v. ${updateController.updater.getCurrentVersionName()}"
         b.btnCheckAppUpdate.setOnClickListener {
             b.btnCheckAppUpdate.isEnabled = false
-            b.tvUpdateStatus.text = "Перевіряємо GitHub Releases…"
+            b.tvUpdateStatus.text = "Перевіряємо оновлення…"
             executor.execute {
                 val res = updateController.updater.checkForUpdate()
                 mainHandler.post {
@@ -175,11 +178,8 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         val site = siteConfig.settings
-        b.tvSiteDefaultsInfo.text =
-            "За замовчуванням із сайту: за ${site.noticeMinutes} хв · режим ${modeText(site.alertMode)}."
-
         val noticeLabels = listOf(
-            "Як на сайті (${site.noticeMinutes} хв)",
+            "Стандарт (за ${site.noticeMinutes} хв)",
             "За 1 хвилину",
             "За 3 хвилини",
             "За 5 хвилин",
@@ -191,15 +191,32 @@ class SettingsActivity : AppCompatActivity() {
         val noticeIdx = noticeValues.indexOf(workingOverrides.noticeMinutesOverride).coerceAtLeast(0)
         b.spinnerNoticeMinutes.setSelection(noticeIdx, false)
 
-        val modeLabels = listOf(
-            "Як на сайті (${modeText(site.alertMode)})",
-            "Звук / MP3 + голос (TTS)",
-            "Тільки голос (TTS)",
-            "Тільки власне MP3 / запис"
-        )
-        b.spinnerAlertMode.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, modeLabels)
-        val modeIdx = modeValues.indexOf(workingOverrides.alertModeOverride).coerceAtLeast(0)
-        b.spinnerAlertMode.setSelection(modeIdx, false)
+        suppressingSourceRadio = true
+        when (workingOverrides.alertSourceMode) {
+            "mp3" -> b.rbSourceMp3.isChecked = true
+            "tts" -> b.rbSourceTts.isChecked = true
+            else -> b.rbSourceStandard.isChecked = true
+        }
+        suppressingSourceRadio = false
+        updateSourceSectionVisibility()
+
+        b.rgAlertSource.setOnCheckedChangeListener { _, checkedId ->
+            if (suppressingSourceRadio) return@setOnCheckedChangeListener
+            if (!ensureProAllowed()) {
+                suppressingSourceRadio = true
+                b.rbSourceStandard.isChecked = true
+                suppressingSourceRadio = false
+                updateSourceSectionVisibility()
+                return@setOnCheckedChangeListener
+            }
+            val newMode = when (checkedId) {
+                R.id.rbSourceMp3 -> "mp3"
+                R.id.rbSourceTts -> "tts"
+                else -> "standard"
+            }
+            workingOverrides = workingOverrides.copy(alertSourceMode = newMode)
+            updateSourceSectionVisibility()
+        }
 
         b.etVoiceTextOff.setText(workingOverrides.customVoiceTextOff)
         b.etVoiceTextOn.setText(workingOverrides.customVoiceTextOn)
@@ -211,14 +228,13 @@ class SettingsActivity : AppCompatActivity() {
         } else {
             site.voiceRate.coerceIn(0.7f, 1.3f)
         }
-        // Snap to 0.05 step required by Material Slider.
         val snappedRate = (Math.round(effectiveRate * 20f) / 20f).coerceIn(0.7f, 1.3f)
         b.sliderVoiceRate.value = snappedRate
-        b.tvVoiceRateLabel.text = String.format(Locale.US, "Швидкість голосу (TTS): %.2fx", snappedRate)
+        b.tvVoiceRateLabel.text = String.format(Locale.US, "Швидкість голосу: %.2fx", snappedRate)
         b.sliderVoiceRate.addOnChangeListener { _, value, fromUser ->
             if (fromUser) {
                 workingOverrides = workingOverrides.copy(voiceRateOverride = value)
-                b.tvVoiceRateLabel.text = String.format(Locale.US, "Швидкість голосу (TTS): %.2fx", value)
+                b.tvVoiceRateLabel.text = String.format(Locale.US, "Швидкість голосу: %.2fx", value)
             }
         }
 
@@ -252,19 +268,12 @@ class SettingsActivity : AppCompatActivity() {
             updateAudioStatusLabels()
         }
 
-        b.btnPreviewOff.setOnClickListener {
-            collectFormIntoOverrides()
-            prefs.saveUserOverrides(workingOverrides)
-            val eff = prefs.resolveEffectiveSettings(siteConfig)
-            previewPlayer.playAlert("off", "20:00", prefs.selectedGroup, eff, ignoreQuietHours = true)
-        }
-
-        b.btnPreviewOn.setOnClickListener {
-            collectFormIntoOverrides()
-            prefs.saveUserOverrides(workingOverrides)
-            val eff = prefs.resolveEffectiveSettings(siteConfig)
-            previewPlayer.playAlert("on", "22:00", prefs.selectedGroup, eff, ignoreQuietHours = true)
-        }
+        b.btnPreviewStdOff.setOnClickListener { playPreview("off") }
+        b.btnPreviewStdOn.setOnClickListener { playPreview("on") }
+        b.btnPreviewMp3Off.setOnClickListener { playPreview("off") }
+        b.btnPreviewMp3On.setOnClickListener { playPreview("on") }
+        b.btnPreviewTtsOff.setOnClickListener { playPreview("off") }
+        b.btnPreviewTtsOn.setOnClickListener { playPreview("on") }
 
         b.btnSaveSettings.setOnClickListener {
             if (!ensureProAllowed()) {
@@ -285,7 +294,7 @@ class SettingsActivity : AppCompatActivity() {
             workingOverrides = prefs.getUserOverrides()
             populateUi()
             ScheduleAlarmScheduler.rescheduleNextAlarm(this)
-            Toast.makeText(this, "Відновлено налаштування сайту.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Відновлено стандартні налаштування.", Toast.LENGTH_SHORT).show()
         }
 
         b.btnActivateLicense.setOnClickListener {
@@ -307,6 +316,36 @@ class SettingsActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    private fun playPreview(kind: String) {
+        collectFormIntoOverrides()
+        prefs.saveUserOverrides(workingOverrides)
+        val eff = prefs.resolveEffectiveSettings(siteConfig)
+        val time = if (kind == "off") "20:00" else "22:00"
+        if (workingOverrides.alertSourceMode == "mp3" &&
+            workingOverrides.customOffAudioUri.isBlank() &&
+            workingOverrides.customOnAudioUri.isBlank()
+        ) {
+            Toast.makeText(this, "MP3 не обрано — звучить стандарт додатка.", Toast.LENGTH_SHORT).show()
+        } else if (workingOverrides.alertSourceMode == "tts" &&
+            workingOverrides.customVoiceTextOff.isBlank() &&
+            workingOverrides.customVoiceTextOn.isBlank()
+        ) {
+            Toast.makeText(this, "Власний текст порожній — звучить стандарт додатка.", Toast.LENGTH_SHORT).show()
+        }
+        previewPlayer.playAlert(kind, time, prefs.selectedGroup, eff, ignoreQuietHours = true)
+    }
+
+    private fun updateSourceSectionVisibility() {
+        val mode = when (b.rgAlertSource.checkedRadioButtonId) {
+            R.id.rbSourceMp3 -> "mp3"
+            R.id.rbSourceTts -> "tts"
+            else -> "standard"
+        }
+        b.layoutSourceStandard.visibility = if (mode == "standard") View.VISIBLE else View.GONE
+        b.layoutSourceMp3.visibility = if (mode == "mp3") View.VISIBLE else View.GONE
+        b.layoutSourceTts.visibility = if (mode == "tts") View.VISIBLE else View.GONE
     }
 
     private fun bindProCardAndLockState() {
@@ -353,7 +392,9 @@ class SettingsActivity : AppCompatActivity() {
         val alpha = if (enabled) 1.0f else 0.48f
         b.layoutCustomOverrides.alpha = alpha
         b.spinnerNoticeMinutes.isEnabled = enabled
-        b.spinnerAlertMode.isEnabled = enabled
+        b.rbSourceStandard.isEnabled = enabled
+        b.rbSourceMp3.isEnabled = enabled
+        b.rbSourceTts.isEnabled = enabled
         b.etVoiceTextOff.isEnabled = enabled
         b.etVoiceTextOn.isEnabled = enabled
         b.etQuietStart.isEnabled = enabled
@@ -365,7 +406,7 @@ class SettingsActivity : AppCompatActivity() {
         if (siteConfig.pro.hasProAccess) return true
         Toast.makeText(
             this,
-            "Тріал завершився. Введіть ключ активації або користуйтесь безкоштовними сповіщеннями сайту.",
+            "Тріал завершився. Введіть ключ активації або користуйтесь стандартними сповіщеннями додатка.",
             Toast.LENGTH_LONG
         ).show()
         return false
@@ -375,13 +416,16 @@ class SettingsActivity : AppCompatActivity() {
         val noticeIdx = b.spinnerNoticeMinutes.selectedItemPosition
         val noticeVal = noticeValues.getOrElse(noticeIdx) { -1 }
 
-        val modeIdx = b.spinnerAlertMode.selectedItemPosition
-        val modeVal = modeValues.getOrElse(modeIdx) { "" }
+        val sourceMode = when (b.rgAlertSource.checkedRadioButtonId) {
+            R.id.rbSourceMp3 -> "mp3"
+            R.id.rbSourceTts -> "tts"
+            else -> "standard"
+        }
 
         workingOverrides = workingOverrides.copy(
             autoOpenAlertScreen = b.switchAutoOpen.isChecked,
             noticeMinutesOverride = noticeVal,
-            alertModeOverride = modeVal,
+            alertSourceMode = sourceMode,
             customVoiceTextOff = b.etVoiceTextOff.text?.toString()?.trim().orEmpty(),
             customVoiceTextOn = b.etVoiceTextOn.text?.toString()?.trim().orEmpty(),
             quietStartOverride = b.etQuietStart.text?.toString()?.trim().orEmpty(),
@@ -399,9 +443,17 @@ class SettingsActivity : AppCompatActivity() {
         }
         val label = uri.lastPathSegment?.substringAfterLast('/') ?: "Обраний аудіофайл"
         workingOverrides = if (kind == "off") {
-            workingOverrides.copy(customOffAudioUri = uri.toString(), customOffAudioLabel = label)
+            workingOverrides.copy(
+                alertSourceMode = "mp3",
+                customOffAudioUri = uri.toString(),
+                customOffAudioLabel = label
+            )
         } else {
-            workingOverrides.copy(customOnAudioUri = uri.toString(), customOnAudioLabel = label)
+            workingOverrides.copy(
+                alertSourceMode = "mp3",
+                customOnAudioUri = uri.toString(),
+                customOnAudioLabel = label
+            )
         }
         updateAudioStatusLabels()
     }
@@ -472,9 +524,17 @@ class SettingsActivity : AppCompatActivity() {
             if (file.exists() && file.length() > 0L) {
                 val uriStr = Uri.fromFile(file).toString()
                 workingOverrides = if (kind == "off") {
-                    workingOverrides.copy(customOffAudioUri = uriStr, customOffAudioLabel = "Запис з мікрофона")
+                    workingOverrides.copy(
+                        alertSourceMode = "mp3",
+                        customOffAudioUri = uriStr,
+                        customOffAudioLabel = "Запис з мікрофона"
+                    )
                 } else {
-                    workingOverrides.copy(customOnAudioUri = uriStr, customOnAudioLabel = "Запис з мікрофона")
+                    workingOverrides.copy(
+                        alertSourceMode = "mp3",
+                        customOnAudioUri = uriStr,
+                        customOnAudioLabel = "Запис з мікрофона"
+                    )
                 }
                 Toast.makeText(this, "Голосовий запис збережено!", Toast.LENGTH_SHORT).show()
             }
@@ -490,23 +550,15 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun updateAudioStatusLabels() {
         b.tvOffAudioStatus.text = if (workingOverrides.customOffAudioUri.isNotBlank()) {
-            "Власне аудіо: ${workingOverrides.customOffAudioLabel.ifBlank { "файл обрано" }}"
+            "Обрано: ${workingOverrides.customOffAudioLabel.ifBlank { "аудіофайл" }}"
         } else {
-            "Як на сайті"
+            "MP3 не обрано (працюватиме стандарт)"
         }
 
         b.tvOnAudioStatus.text = if (workingOverrides.customOnAudioUri.isNotBlank()) {
-            "Власне аудіо: ${workingOverrides.customOnAudioLabel.ifBlank { "файл обрано" }}"
+            "Обрано: ${workingOverrides.customOnAudioLabel.ifBlank { "аудіофайл" }}"
         } else {
-            "Як на сайті"
-        }
-    }
-
-    private fun modeText(mode: String): String {
-        return when (mode) {
-            "speech" -> "тільки голос"
-            "audio" -> "тільки аудіо"
-            else -> "звук + голос"
+            "MP3 не обрано (працюватиме стандарт)"
         }
     }
 }

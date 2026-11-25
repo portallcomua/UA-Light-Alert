@@ -2,7 +2,7 @@
 /**
  * Plugin Name: UA Light Alert
  * Description: Графіки відключень, CRM рекламодавців та сповіщення про зміни електропостачання.
- * Version: 4.8.1
+ * Version: 4.9.0
  * Plugin URI: https://uaserver.pp.ua/svitlo/
  * Update URI: https://github.com/portallcomua/UA-Light-Alert
  * Author: UAServer
@@ -49,7 +49,7 @@ final class UA_Light_Alert {
                 require_once ABSPATH . 'wp-includes/functions.php';
             }
             $data = get_file_data(__FILE__, ['Version' => 'Version']);
-            $version = !empty($data['Version']) ? $data['Version'] : '4.8.1';
+            $version = !empty($data['Version']) ? $data['Version'] : '4.9.0';
         }
         return $version;
     }
@@ -114,7 +114,7 @@ final class UA_Light_Alert {
             ];
             $manifest = [
                 'name' => 'Графік світла',
-                'short_name' => 'Графік світла',
+                'short_name' => 'Світло UA',
                 'lang' => 'uk',
                 'dir' => 'ltr',
                 'description' => 'Графіки та сповіщення про відключення електроенергії',
@@ -1342,21 +1342,36 @@ JS;
                     Показати графік та увімкнути сповіщення
                 </button>
 
-                <div class="ua-pwa-install-wrap">
-                    <button type="button" id="ua-pwa-install" class="ua-pwa-install" aria-label="Створити іконку">
+                <div id="ua-pwa-install-wrap" class="ua-pwa-install-wrap">
+                    <button type="button" id="ua-pwa-install" class="ua-pwa-install" aria-label="Створити іконку на головному екрані">
                         <span class="ua-pwa-install-icon" aria-hidden="true">📲</span>
-                        Створити іконку
+                        Створити іконку (встановити як додаток)
                     </button>
-                    <?php
-                    $mobile_settings = UA_Light_Alert_Mobile_API::get_mobile_settings();
-                    if (!empty($mobile_settings['apk_download_url'])) :
-                    ?>
-                        <a href="<?php echo esc_url($mobile_settings['apk_download_url']); ?>" class="ua-pwa-install" style="margin-top:8px;background:#222;text-decoration:none;" download>
-                            <span class="ua-pwa-install-icon" aria-hidden="true">🤖</span>
-                            Завантажити Android-додаток (.apk)
-                        </a>
-                    <?php endif; ?>
                     <div id="ua-pwa-install-help" class="ua-pwa-install-help" role="status" aria-live="polite" hidden></div>
+                </div>
+
+                <?php
+                $mobile_settings = UA_Light_Alert_Mobile_API::get_mobile_settings();
+                if (!empty($mobile_settings['apk_download_url'])) :
+                ?>
+                    <div id="ua-apk-download-wrap" class="ua-apk-download-wrap">
+                        <a href="<?php echo esc_url($mobile_settings['apk_download_url']); ?>" class="ua-apk-download-btn" download target="_blank" rel="noopener">
+                            <span aria-hidden="true">🤖</span>
+                            Окремий Android-додаток (.apk)
+                        </a>
+                    </div>
+                <?php endif; ?>
+
+                <div class="ua-share-wrap" aria-label="Поділитися сторінкою">
+                    <div class="ua-share-title">Поділитися графіком:</div>
+                    <div class="ua-share-buttons">
+                        <a id="ua-share-fb" class="ua-share-btn ua-share-fb" href="#" target="_blank" rel="noopener noreferrer">Facebook</a>
+                        <a id="ua-share-tg" class="ua-share-btn ua-share-tg" href="#" target="_blank" rel="noopener noreferrer">Telegram</a>
+                        <a id="ua-share-viber" class="ua-share-btn ua-share-viber" href="#" rel="noopener noreferrer">Viber</a>
+                        <a id="ua-share-email" class="ua-share-btn ua-share-email" href="#">Email</a>
+                        <button type="button" id="ua-share-copy" class="ua-share-btn ua-share-copy">Копіювати посилання</button>
+                    </div>
+                    <div id="ua-share-status" class="ua-share-status" role="status" aria-live="polite" hidden></div>
                 </div>
 
                 <p class="ua-help">
@@ -1393,7 +1408,13 @@ JS;
             }
             .ua-light-widget * { box-sizing: border-box; }
             .ua-pwa-install-wrap { margin: 14px 0 4px; }
+            .ua-pwa-install-wrap[hidden],
+            .ua-apk-download-wrap[hidden],
             .ua-light-widget .ua-pwa-install[hidden] { display: none !important; }
+            @media (display-mode: standalone) {
+                .ua-pwa-install-wrap,
+                .ua-apk-download-wrap { display: none !important; }
+            }
             .ua-light-widget .ua-pwa-install {
                 display: inline-flex;
                 align-items: center;
@@ -1410,10 +1431,77 @@ JS;
                 font-size: 16px;
                 font-weight: 700;
                 cursor: pointer;
+                text-align: center;
             }
             .ua-light-widget .ua-pwa-install:hover { background: #e85f00; }
             .ua-light-widget .ua-pwa-install:focus-visible { outline: 3px solid #222; outline-offset: 3px; }
             .ua-pwa-install-icon { font-size: 20px; line-height: 1; }
+            .ua-apk-download-wrap { margin: 8px 0 4px; }
+            .ua-apk-download-btn {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                gap: 8px;
+                width: 100%;
+                max-width: 420px;
+                min-height: 44px;
+                padding: 10px 16px;
+                border: 1px solid #222;
+                border-radius: 8px;
+                background: #222;
+                color: #fff !important;
+                font-size: 14px;
+                font-weight: 600;
+                text-decoration: none !important;
+                text-align: center;
+            }
+            .ua-apk-download-btn:hover { background: #383838; }
+            .ua-share-wrap {
+                margin: 12px 0 4px;
+                padding: 10px 12px;
+                border: 1px solid #ececec;
+                border-radius: 8px;
+                background: #fafafa;
+                max-width: 420px;
+            }
+            .ua-share-title {
+                margin: 0 0 8px;
+                font-size: 13px;
+                font-weight: 700;
+                color: #333;
+            }
+            .ua-share-buttons {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 6px;
+            }
+            .ua-share-btn {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                min-height: 36px;
+                padding: 7px 11px;
+                border: 0;
+                border-radius: 6px;
+                font-size: 13px;
+                font-weight: 600;
+                color: #fff !important;
+                text-decoration: none !important;
+                cursor: pointer;
+                line-height: 1.2;
+            }
+            .ua-share-fb { background: #1877f2; }
+            .ua-share-tg { background: #229ed9; }
+            .ua-share-viber { background: #7360f2; }
+            .ua-share-email { background: #555; }
+            .ua-share-copy { background: #ff6b00; }
+            .ua-share-btn:hover { opacity: 0.9; }
+            .ua-share-status {
+                margin-top: 8px;
+                font-size: 13px;
+                font-weight: 600;
+                color: #155724;
+            }
             .ua-pwa-install-help {
                 margin: 10px 0 0;
                 padding: 10px 12px;
@@ -1601,6 +1689,8 @@ JS;
             var ajaxNonce = <?php echo wp_json_encode($nonce); ?>;
             var vapidPublicKey = <?php echo wp_json_encode($push_public_key); ?>;
             var pushSubscribeUrl = <?php echo wp_json_encode($push_subscribe_url); ?>;
+            var installWrap = document.getElementById('ua-pwa-install-wrap');
+            var apkWrap = document.getElementById('ua-apk-download-wrap');
             var installButton = document.getElementById('ua-pwa-install');
             var installHelp = document.getElementById('ua-pwa-install-help');
             var pwaInstalledFlagKey = 'ua_light_pwa_installed_v1';
@@ -1630,6 +1720,13 @@ JS;
                         localStorage.removeItem(pwaInstalledFlagKey);
                     }
                 } catch (e) {}
+            }
+
+            function syncStandaloneVisibility() {
+                if (isPwaInstalled()) {
+                    if (installWrap) installWrap.hidden = true;
+                    if (apkWrap) apkWrap.hidden = true;
+                }
             }
 
             function checkRelatedInstalledApps() {
@@ -1724,6 +1821,8 @@ JS;
                 });
             }
 
+            syncStandaloneVisibility();
+
             if (isPwaInstalled()) {
                 writeInstalledFlag(true);
             } else {
@@ -1766,7 +1865,7 @@ JS;
                 installButton.addEventListener('click', function() {
                     if (isPwaInstalled()) {
                         writeInstalledFlag(true);
-                        showInstallHelp('✔ Іконка «Графік світла» вже створена — зараз ви відкрили сторінку саме через неї.', 'info');
+                        syncStandaloneVisibility();
                         return;
                     }
 
@@ -1777,7 +1876,7 @@ JS;
                     }
 
                     installButton.disabled = true;
-                    waitForInstallPrompt(1200).then(function(readyPrompt) {
+                    waitForInstallPrompt(2000).then(function(readyPrompt) {
                         installButton.disabled = false;
                         if (readyPrompt) {
                             triggerNativeInstallPrompt(readyPrompt);
@@ -1798,6 +1897,64 @@ JS;
                     });
                 });
             }
+
+            (function setupShareButtons() {
+                var shareUrl = (window.location.href || <?php echo wp_json_encode(get_permalink() ?: home_url('/svitlo/')); ?>).split('#')[0];
+                var shareTitle = 'Графік відключень світла та сповіщення';
+                var shareText = 'Графік відключень електроенергії та сповіщення про зміни:';
+                var fbBtn = document.getElementById('ua-share-fb');
+                var tgBtn = document.getElementById('ua-share-tg');
+                var viberBtn = document.getElementById('ua-share-viber');
+                var emailBtn = document.getElementById('ua-share-email');
+                var copyBtn = document.getElementById('ua-share-copy');
+                var shareStatus = document.getElementById('ua-share-status');
+
+                if (fbBtn) {
+                    fbBtn.href = 'https://www.facebook.com/sharer/sharer.php?u=' + encodeURIComponent(shareUrl);
+                }
+                if (tgBtn) {
+                    tgBtn.href = 'https://t.me/share/url?url=' + encodeURIComponent(shareUrl) + '&text=' + encodeURIComponent(shareText);
+                }
+                if (viberBtn) {
+                    viberBtn.href = 'viber://forward?text=' + encodeURIComponent(shareText + ' ' + shareUrl);
+                }
+                if (emailBtn) {
+                    emailBtn.href = 'mailto:?subject=' + encodeURIComponent(shareTitle) + '&body=' + encodeURIComponent(shareText + '\n' + shareUrl);
+                }
+                if (copyBtn) {
+                    copyBtn.addEventListener('click', function() {
+                        function onCopied() {
+                            if (!shareStatus) return;
+                            shareStatus.textContent = '✔ Посилання скопійовано!';
+                            shareStatus.hidden = false;
+                            setTimeout(function() {
+                                shareStatus.hidden = true;
+                            }, 3500);
+                        }
+                        if (navigator.clipboard && navigator.clipboard.writeText) {
+                            navigator.clipboard.writeText(shareUrl).then(onCopied).catch(function() {
+                                fallbackCopy();
+                            });
+                        } else {
+                            fallbackCopy();
+                        }
+                        function fallbackCopy() {
+                            try {
+                                var temp = document.createElement('textarea');
+                                temp.value = shareUrl;
+                                temp.style.position = 'fixed';
+                                temp.style.opacity = '0';
+                                document.body.appendChild(temp);
+                                temp.focus();
+                                temp.select();
+                                document.execCommand('copy');
+                                document.body.removeChild(temp);
+                                onCopied();
+                            } catch (e) {}
+                        }
+                    });
+                }
+            })();
 
             var storageKey = 'ua_light_alert_selection_v1';
             var alertedEvents = {};

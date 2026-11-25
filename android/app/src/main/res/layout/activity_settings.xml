@@ -25,7 +25,8 @@
                 android:id="@+id/btnBack"
                 style="@style/Widget.Material3.Button.TextButton"
                 android:layout_width="wrap_content"
-                android:layout_height="40dp"
+                android:layout_height="wrap_content"
+                android:minHeight="44dp"
                 android:text="← Назад" />
 
             <TextView
@@ -80,8 +81,8 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
-                    android:textIsSelectable="true"
                     android:textColor="@color/ink_secondary"
+                    android:textIsSelectable="true"
                     android:textSize="12sp"
                     android:textStyle="bold" />
 
@@ -108,7 +109,8 @@
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnActivateLicense"
                         android:layout_width="wrap_content"
-                        android:layout_height="52dp"
+                        android:layout_height="wrap_content"
+                        android:minHeight="52dp"
                         android:backgroundTint="@color/brand_orange"
                         android:text="Активувати"
                         android:textColor="@android:color/white" />
@@ -118,8 +120,9 @@
                     android:id="@+id/btnPayPro"
                     style="@style/Widget.Material3.Button.OutlinedButton"
                     android:layout_width="wrap_content"
-                    android:layout_height="40dp"
+                    android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
+                    android:minHeight="44dp"
                     android:text="Сплатити 100 грн"
                     android:visibility="gone" />
             </LinearLayout>
@@ -162,10 +165,13 @@
                     android:id="@+id/btnTestAlert"
                     style="@style/Widget.Material3.Button.OutlinedButton"
                     android:layout_width="match_parent"
-                    android:layout_height="44dp"
+                    android:layout_height="wrap_content"
                     android:layout_marginTop="12dp"
-                    android:text="Тест повноекранного сповіщення"
-                    android:textSize="13sp" />
+                    android:minHeight="54dp"
+                    android:paddingHorizontal="16dp"
+                    android:paddingVertical="12dp"
+                    android:text="🔔 Тест сповіщення на весь екран"
+                    android:textSize="15sp" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
@@ -190,7 +196,7 @@
                     android:id="@+id/tvAppVersionInfo"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Версія додатка: v. 4.8.1"
+                    android:text="Версія додатка: v. 4.9.0"
                     android:textColor="@color/ink_primary"
                     android:textSize="14sp"
                     android:textStyle="bold" />
@@ -200,7 +206,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
-                    android:text="Оновлення завантажуються автоматично з GitHub Releases."
+                    android:text="Оновлення завантажуються і встановлюються безпосередньо в додатку."
                     android:textColor="@color/ink_secondary"
                     android:textSize="12sp" />
 
@@ -208,14 +214,16 @@
                     android:id="@+id/btnCheckAppUpdate"
                     style="@style/Widget.Material3.Button.TonalButton"
                     android:layout_width="match_parent"
-                    android:layout_height="44dp"
+                    android:layout_height="wrap_content"
                     android:layout_marginTop="10dp"
+                    android:minHeight="50dp"
+                    android:paddingVertical="10dp"
                     android:text="Перевірити оновлення"
-                    android:textSize="13sp" />
+                    android:textSize="14sp" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- Custom Overrides Card (Pro when monetization is enabled) -->
+        <!-- Sound / Voice Source & Timing Card -->
         <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -236,23 +244,330 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Персональні налаштування на телефоні"
+                    android:text="Що вмикати у сповіщеннях"
                     android:textColor="@color/ink_primary"
                     android:textSize="16sp"
                     android:textStyle="bold" />
 
                 <TextView
-                    android:id="@+id/tvSiteDefaultsInfo"
+                    android:id="@+id/tvSourceHelp"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
+                    android:text="Оберіть один варіант. Якщо свій MP3 або текст не заповнені — працюватиме стандарт додатка."
                     android:textColor="@color/ink_secondary"
                     android:textSize="12sp" />
+
+                <!-- Single mutual-exclusive selector -->
+                <RadioGroup
+                    android:id="@+id/rgAlertSource"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:orientation="vertical">
+
+                    <com.google.android.material.radiobutton.MaterialRadioButton
+                        android:id="@+id/rbSourceStandard"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:minHeight="48dp"
+                        android:text="Стандарт (звук і голос додатка)"
+                        android:textColor="@color/ink_primary"
+                        android:textSize="14sp"
+                        android:textStyle="bold" />
+
+                    <com.google.android.material.radiobutton.MaterialRadioButton
+                        android:id="@+id/rbSourceMp3"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:minHeight="48dp"
+                        android:text="Свій MP3 (обрати файл або запис)"
+                        android:textColor="@color/ink_primary"
+                        android:textSize="14sp"
+                        android:textStyle="bold" />
+
+                    <com.google.android.material.radiobutton.MaterialRadioButton
+                        android:id="@+id/rbSourceTts"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:minHeight="48dp"
+                        android:text="Ваш текст (озвучення голосом)"
+                        android:textColor="@color/ink_primary"
+                        android:textSize="14sp"
+                        android:textStyle="bold" />
+                </RadioGroup>
+
+                <!-- 1. Standard section -->
+                <LinearLayout
+                    android:id="@+id/layoutSourceStandard"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:background="@color/surface_bg"
+                    android:orientation="vertical"
+                    android:padding="12dp">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Вмикається стандартний сигнал та голосове попередження з додатка."
+                        android:textColor="@color/ink_secondary"
+                        android:textSize="13sp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnPreviewStdOff"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:minHeight="50dp"
+                        android:paddingVertical="10dp"
+                        android:text="▶ Прослухати стандарт: вимкнення"
+                        android:textSize="14sp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnPreviewStdOn"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:minHeight="50dp"
+                        android:paddingVertical="10dp"
+                        android:text="▶ Прослухати стандарт: увімкнення"
+                        android:textSize="14sp" />
+                </LinearLayout>
+
+                <!-- 2. Custom MP3 / Recording section -->
+                <LinearLayout
+                    android:id="@+id/layoutSourceMp3"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:background="@color/surface_bg"
+                    android:orientation="vertical"
+                    android:padding="12dp"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Перед ВИМКНЕННЯМ світла:"
+                        android:textColor="@color/ink_primary"
+                        android:textSize="14sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/tvOffAudioStatus"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="MP3 не обрано (спрацює стандарт)"
+                        android:textColor="@color/ink_secondary"
+                        android:textSize="12sp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnPickOffAudio"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:minHeight="52dp"
+                        android:paddingHorizontal="16dp"
+                        android:paddingVertical="12dp"
+                        android:text="📁 Обрати MP3 (вимкнення)"
+                        android:textSize="14sp" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:orientation="horizontal">
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnRecordOffVoice"
+                            style="@style/Widget.Material3.Button.TonalButton"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginEnd="6dp"
+                            android:layout_weight="1"
+                            android:minHeight="48dp"
+                            android:paddingVertical="10dp"
+                            android:text="🎙 Наговорити"
+                            android:textSize="13sp" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnClearOffAudio"
+                            style="@style/Widget.Material3.Button.TextButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:minHeight="48dp"
+                            android:text="Очистити"
+                            android:textSize="13sp" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="14dp"
+                        android:text="Перед УВІМКНЕННЯМ світла:"
+                        android:textColor="@color/ink_primary"
+                        android:textSize="14sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/tvOnAudioStatus"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="MP3 не обрано (спрацює стандарт)"
+                        android:textColor="@color/ink_secondary"
+                        android:textSize="12sp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnPickOnAudio"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:minHeight="52dp"
+                        android:paddingHorizontal="16dp"
+                        android:paddingVertical="12dp"
+                        android:text="📁 Обрати MP3 (увімкнення)"
+                        android:textSize="14sp" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:orientation="horizontal">
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnRecordOnVoice"
+                            style="@style/Widget.Material3.Button.TonalButton"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginEnd="6dp"
+                            android:layout_weight="1"
+                            android:minHeight="48dp"
+                            android:paddingVertical="10dp"
+                            android:text="🎙 Наговорити"
+                            android:textSize="13sp" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnClearOnAudio"
+                            style="@style/Widget.Material3.Button.TextButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:minHeight="48dp"
+                            android:text="Очистити"
+                            android:textSize="13sp" />
+                    </LinearLayout>
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnPreviewMp3Off"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="14dp"
+                        android:minHeight="52dp"
+                        android:paddingVertical="12dp"
+                        android:text="▶ Прослухати: вимкнення"
+                        android:textSize="14sp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnPreviewMp3On"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:minHeight="52dp"
+                        android:paddingVertical="12dp"
+                        android:text="▶ Прослухати: увімкнення"
+                        android:textSize="14sp" />
+                </LinearLayout>
+
+                <!-- 3. Custom Text (TTS) section -->
+                <LinearLayout
+                    android:id="@+id/layoutSourceTts"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:background="@color/surface_bg"
+                    android:orientation="vertical"
+                    android:padding="12dp"
+                    android:visibility="gone">
+
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:hint="Ваш текст перед вимкненням світла">
+
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/etVoiceTextOff"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:minLines="2" />
+                    </com.google.android.material.textfield.TextInputLayout>
+
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:hint="Ваш текст перед увімкненням світла">
+
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/etVoiceTextOn"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:minLines="2" />
+                    </com.google.android.material.textfield.TextInputLayout>
+
+                    <TextView
+                        android:id="@+id/tvVoiceRateLabel"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:text="Швидкість голосу: 0.95x"
+                        android:textColor="@color/ink_primary"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
+
+                    <com.google.android.material.slider.Slider
+                        android:id="@+id/sliderVoiceRate"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:stepSize="0.05"
+                        android:value="0.95"
+                        android:valueFrom="0.7"
+                        android:valueTo="1.3" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnPreviewTtsOff"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:minHeight="52dp"
+                        android:paddingVertical="12dp"
+                        android:text="▶ Прослухати: вимкнення"
+                        android:textSize="14sp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnPreviewTtsOn"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:minHeight="52dp"
+                        android:paddingVertical="12dp"
+                        android:text="▶ Прослухати: увімкнення"
+                        android:textSize="14sp" />
+                </LinearLayout>
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
+                    android:layout_marginTop="14dp"
                     android:text="За скільки хвилин попереджати:"
                     android:textColor="@color/ink_primary"
                     android:textSize="13sp"
@@ -261,184 +576,14 @@
                 <Spinner
                     android:id="@+id/spinnerNoticeMinutes"
                     android:layout_width="match_parent"
-                    android:layout_height="44dp"
+                    android:layout_height="46dp"
                     android:layout_marginTop="4dp" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:text="Режим озвучення:"
-                    android:textColor="@color/ink_primary"
-                    android:textSize="13sp"
-                    android:textStyle="bold" />
-
-                <Spinner
-                    android:id="@+id/spinnerAlertMode"
-                    android:layout_width="match_parent"
-                    android:layout_height="44dp"
-                    android:layout_marginTop="4dp" />
-
-                <!-- Custom OFF audio -->
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="14dp"
-                    android:text="Власний звук / запис перед ВИМКНЕННЯМ світла:"
-                    android:textColor="@color/ink_primary"
-                    android:textSize="13sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:id="@+id/tvOffAudioStatus"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="2dp"
-                    android:text="Як на сайті"
-                    android:textColor="@color/ink_secondary"
-                    android:textSize="12sp" />
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
-                    android:orientation="horizontal">
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btnPickOffAudio"
-                        style="@style/Widget.Material3.Button.OutlinedButton"
-                        android:layout_width="0dp"
-                        android:layout_height="40dp"
-                        android:layout_marginEnd="6dp"
-                        android:layout_weight="1"
-                        android:text="Обрати MP3"
-                        android:textSize="12sp" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btnRecordOffVoice"
-                        style="@style/Widget.Material3.Button.TonalButton"
-                        android:layout_width="0dp"
-                        android:layout_height="40dp"
-                        android:layout_marginEnd="6dp"
-                        android:layout_weight="1"
-                        android:text="🎙 Наговорити"
-                        android:textSize="12sp" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btnClearOffAudio"
-                        style="@style/Widget.Material3.Button.TextButton"
-                        android:layout_width="wrap_content"
-                        android:layout_height="40dp"
-                        android:text="✕"
-                        android:textSize="12sp" />
-                </LinearLayout>
-
-                <!-- Custom ON audio -->
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="14dp"
-                    android:text="Власний звук / запис перед УВІМКНЕННЯМ світла:"
-                    android:textColor="@color/ink_primary"
-                    android:textSize="13sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:id="@+id/tvOnAudioStatus"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="2dp"
-                    android:text="Як на сайті"
-                    android:textColor="@color/ink_secondary"
-                    android:textSize="12sp" />
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
-                    android:orientation="horizontal">
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btnPickOnAudio"
-                        style="@style/Widget.Material3.Button.OutlinedButton"
-                        android:layout_width="0dp"
-                        android:layout_height="40dp"
-                        android:layout_marginEnd="6dp"
-                        android:layout_weight="1"
-                        android:text="Обрати MP3"
-                        android:textSize="12sp" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btnRecordOnVoice"
-                        style="@style/Widget.Material3.Button.TonalButton"
-                        android:layout_width="0dp"
-                        android:layout_height="40dp"
-                        android:layout_marginEnd="6dp"
-                        android:layout_weight="1"
-                        android:text="🎙 Наговорити"
-                        android:textSize="12sp" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btnClearOnAudio"
-                        style="@style/Widget.Material3.Button.TextButton"
-                        android:layout_width="wrap_content"
-                        android:layout_height="40dp"
-                        android:text="✕"
-                        android:textSize="12sp" />
-                </LinearLayout>
-
-                <!-- Custom TTS texts -->
-                <com.google.android.material.textfield.TextInputLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="14dp"
-                    android:hint="Власний текст перед вимкненням (порожньо — як на сайті)">
-
-                    <com.google.android.material.textfield.TextInputEditText
-                        android:id="@+id/etVoiceTextOff"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:minLines="2" />
-                </com.google.android.material.textfield.TextInputLayout>
-
-                <com.google.android.material.textfield.TextInputLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="10dp"
-                    android:hint="Власний текст перед увімкненням (порожньо — як на сайті)">
-
-                    <com.google.android.material.textfield.TextInputEditText
-                        android:id="@+id/etVoiceTextOn"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:minLines="2" />
-                </com.google.android.material.textfield.TextInputLayout>
-
-                <!-- Voice rate -->
-                <TextView
-                    android:id="@+id/tvVoiceRateLabel"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:text="Швидкість голосу (TTS): 0.95x"
-                    android:textColor="@color/ink_primary"
-                    android:textSize="13sp"
-                    android:textStyle="bold" />
-
-                <com.google.android.material.slider.Slider
-                    android:id="@+id/sliderVoiceRate"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:stepSize="0.05"
-                    android:value="0.95"
-                    android:valueFrom="0.7"
-                    android:valueTo="1.3" />
 
                 <!-- Quiet hours -->
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
+                    android:layout_marginTop="10dp"
                     android:text="Тихі години на телефоні (наприклад 23:00 — 07:00):"
                     android:textColor="@color/ink_primary"
                     android:textSize="13sp"
@@ -478,49 +623,26 @@
                     </com.google.android.material.textfield.TextInputLayout>
                 </LinearLayout>
 
-                <!-- Preview & Save -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="14dp"
-                    android:orientation="horizontal">
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btnPreviewOff"
-                        style="@style/Widget.Material3.Button.OutlinedButton"
-                        android:layout_width="0dp"
-                        android:layout_height="44dp"
-                        android:layout_marginEnd="8dp"
-                        android:layout_weight="1"
-                        android:text="▶ Тест: вимкнення"
-                        android:textSize="12sp" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btnPreviewOn"
-                        style="@style/Widget.Material3.Button.OutlinedButton"
-                        android:layout_width="0dp"
-                        android:layout_height="44dp"
-                        android:layout_weight="1"
-                        android:text="▶ Тест: увімкнення"
-                        android:textSize="12sp" />
-                </LinearLayout>
-
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnSaveSettings"
                     android:layout_width="match_parent"
-                    android:layout_height="48dp"
-                    android:layout_marginTop="12dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:minHeight="54dp"
+                    android:paddingVertical="12dp"
                     android:backgroundTint="@color/brand_orange"
                     android:text="Зберегти налаштування"
-                    android:textColor="@android:color/white" />
+                    android:textColor="@android:color/white"
+                    android:textSize="15sp" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnResetOverrides"
                     style="@style/Widget.Material3.Button.TextButton"
                     android:layout_width="match_parent"
-                    android:layout_height="40dp"
+                    android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
-                    android:text="Скинути до стандартних налаштувань сайту" />
+                    android:minHeight="44dp"
+                    android:text="Скинути на стандартні налаштування" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
     </LinearLayout>

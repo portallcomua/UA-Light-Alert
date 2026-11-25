@@ -206,7 +206,7 @@ class ApiClient(private val context: Context, private val prefs: PrefsStore) {
         )
 
         return SiteConfig(
-            pluginVersion = root.optString("plugin_version", "4.8.1"),
+            pluginVersion = root.optString("plugin_version", "4.9.0"),
             siteName = "Графік відключень",
             scheduleUrl = root.optString("schedule_url", "${BuildConfig.SITE_BASE_URL}/svitlo/"),
             regions = if (regions.isNotEmpty()) regions else SiteConfig.defaultRegions(),

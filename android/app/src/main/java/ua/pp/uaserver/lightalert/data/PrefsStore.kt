@@ -57,16 +57,31 @@ class PrefsStore(context: Context) {
     }
 
     fun getUserOverrides(): UserOverrides {
+        val offUri = prefs.getString(KEY_CUSTOM_OFF_URI, "") ?: ""
+        val onUri = prefs.getString(KEY_CUSTOM_ON_URI, "") ?: ""
+        val txtOff = prefs.getString(KEY_CUSTOM_TEXT_OFF, "") ?: ""
+        val txtOn = prefs.getString(KEY_CUSTOM_TEXT_ON, "") ?: ""
+        val legacyMode = prefs.getString(KEY_ALERT_MODE_OVERRIDE, "") ?: ""
+        val savedSource = prefs.getString(KEY_ALERT_SOURCE_MODE, "") ?: ""
+        val resolvedSource = when (savedSource) {
+            "standard", "mp3", "tts" -> savedSource
+            else -> when {
+                (offUri.isNotBlank() || onUri.isNotBlank()) && (legacyMode == "audio" || legacyMode == "both") -> "mp3"
+                txtOff.isNotBlank() || txtOn.isNotBlank() || legacyMode == "speech" -> "tts"
+                else -> "standard"
+            }
+        }
         return UserOverrides(
             autoOpenAlertScreen = prefs.getBoolean(KEY_AUTO_OPEN_SCREEN, true),
             noticeMinutesOverride = prefs.getInt(KEY_NOTICE_MIN_OVERRIDE, -1),
-            alertModeOverride = prefs.getString(KEY_ALERT_MODE_OVERRIDE, "") ?: "",
-            customOffAudioUri = prefs.getString(KEY_CUSTOM_OFF_URI, "") ?: "",
-            customOnAudioUri = prefs.getString(KEY_CUSTOM_ON_URI, "") ?: "",
+            alertSourceMode = resolvedSource,
+            alertModeOverride = legacyMode,
+            customOffAudioUri = offUri,
+            customOnAudioUri = onUri,
             customOffAudioLabel = prefs.getString(KEY_CUSTOM_OFF_LABEL, "") ?: "",
             customOnAudioLabel = prefs.getString(KEY_CUSTOM_ON_LABEL, "") ?: "",
-            customVoiceTextOff = prefs.getString(KEY_CUSTOM_TEXT_OFF, "") ?: "",
-            customVoiceTextOn = prefs.getString(KEY_CUSTOM_TEXT_ON, "") ?: "",
+            customVoiceTextOff = txtOff,
+            customVoiceTextOn = txtOn,
             voiceRateOverride = prefs.getFloat(KEY_VOICE_RATE_OVERRIDE, -1f),
             quietStartOverride = prefs.getString(KEY_QUIET_START_OVERRIDE, "") ?: "",
             quietEndOverride = prefs.getString(KEY_QUIET_END_OVERRIDE, "") ?: ""
@@ -77,6 +92,7 @@ class PrefsStore(context: Context) {
         prefs.edit()
             .putBoolean(KEY_AUTO_OPEN_SCREEN, overrides.autoOpenAlertScreen)
             .putInt(KEY_NOTICE_MIN_OVERRIDE, overrides.noticeMinutesOverride)
+            .putString(KEY_ALERT_SOURCE_MODE, overrides.alertSourceMode)
             .putString(KEY_ALERT_MODE_OVERRIDE, overrides.alertModeOverride)
             .putString(KEY_CUSTOM_OFF_URI, overrides.customOffAudioUri)
             .putString(KEY_CUSTOM_ON_URI, overrides.customOnAudioUri)
@@ -126,12 +142,6 @@ class PrefsStore(context: Context) {
             site.noticeMinutes.coerceIn(1, 60)
         }
 
-        val alertMode = if (user.alertModeOverride.isNotBlank()) {
-            user.alertModeOverride
-        } else {
-            site.alertMode
-        }
-
         val voiceRate = if (user.voiceRateOverride > 0f) {
             user.voiceRateOverride.coerceIn(0.7f, 1.3f)
         } else {
@@ -150,17 +160,51 @@ class PrefsStore(context: Context) {
             site.quietEnd
         }
 
+        val hasAnyMp3 = user.customOffAudioUri.isNotBlank() || user.customOnAudioUri.isNotBlank()
+        val hasAnyCustomText = user.customVoiceTextOff.isNotBlank() || user.customVoiceTextOn.isNotBlank()
+
+        val effectiveAlertMode: String
+        val effectiveOffUri: String
+        val effectiveOnUri: String
+        val effectiveTextOff: String
+        val effectiveTextOn: String
+
+        when {
+            user.alertSourceMode == "mp3" && hasAnyMp3 -> {
+                effectiveAlertMode = "audio"
+                effectiveOffUri = user.customOffAudioUri
+                effectiveOnUri = user.customOnAudioUri
+                effectiveTextOff = site.voiceTextOff
+                effectiveTextOn = site.voiceTextOn
+            }
+            user.alertSourceMode == "tts" && hasAnyCustomText -> {
+                effectiveAlertMode = "speech"
+                effectiveOffUri = ""
+                effectiveOnUri = ""
+                effectiveTextOff = user.customVoiceTextOff.ifBlank { site.voiceTextOff }
+                effectiveTextOn = user.customVoiceTextOn.ifBlank { site.voiceTextOn }
+            }
+            else -> {
+                // Standard app/site alert (also automatic fallback if MP3 or custom text are empty).
+                effectiveAlertMode = site.alertMode
+                effectiveOffUri = ""
+                effectiveOnUri = ""
+                effectiveTextOff = site.voiceTextOff
+                effectiveTextOn = site.voiceTextOn
+            }
+        }
+
         return EffectiveAlertSettings(
             noticeMinutes = noticeMinutes,
-            alertMode = alertMode,
-            customOffAudioUri = user.customOffAudioUri,
-            customOnAudioUri = user.customOnAudioUri,
+            alertMode = effectiveAlertMode,
+            customOffAudioUri = effectiveOffUri,
+            customOnAudioUri = effectiveOnUri,
             remoteOffAudioUrl = site.soundOffUrl,
             remoteOnAudioUrl = site.soundOnUrl,
             voiceRate = voiceRate,
             voicePitch = site.voicePitch.coerceIn(0.8f, 1.2f),
-            voiceTextOff = user.customVoiceTextOff.ifBlank { site.voiceTextOff },
-            voiceTextOn = user.customVoiceTextOn.ifBlank { site.voiceTextOn },
+            voiceTextOff = effectiveTextOff,
+            voiceTextOn = effectiveTextOn,
             voiceVolume = site.voiceVolume,
             soundVolume = site.soundVolume,
             alertRepeat = site.alertRepeat,
@@ -178,6 +222,7 @@ class PrefsStore(context: Context) {
         private const val KEY_CACHED_ADS = "cached_ads_json"
         private const val KEY_AUTO_OPEN_SCREEN = "auto_open_alert_screen"
         private const val KEY_NOTICE_MIN_OVERRIDE = "notice_min_override"
+        private const val KEY_ALERT_SOURCE_MODE = "alert_source_mode"
         private const val KEY_ALERT_MODE_OVERRIDE = "alert_mode_override"
         private const val KEY_CUSTOM_OFF_URI = "custom_off_audio_uri"
         private const val KEY_CUSTOM_ON_URI = "custom_on_audio_uri"

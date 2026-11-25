@@ -2,6 +2,8 @@ package ua.pp.uaserver.lightalert.ui
 
 import android.Manifest
 import android.app.NotificationManager
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -13,12 +15,14 @@ import android.provider.Settings
 import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
+import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.recyclerview.widget.LinearLayoutManager
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import org.json.JSONObject
 import ua.pp.uaserver.lightalert.BuildConfig
 import ua.pp.uaserver.lightalert.alarm.ScheduleAlarmScheduler
@@ -82,6 +86,7 @@ class MainActivity : AppCompatActivity() {
         prefs = PrefsStore(this)
         api = ApiClient(this, prefs)
         updateController = AppUpdateController(this, executor)
+        updateController.updater.cleanupOldUpdates()
 
         ScheduleAlarmScheduler.ensureNotificationChannels(this)
         ScheduleAlarmScheduler.schedulePeriodicSync(this)
@@ -92,6 +97,10 @@ class MainActivity : AppCompatActivity() {
         b.swipeRefresh.setOnRefreshListener {
             loadAllData()
             checkAppUpdate(force = true)
+        }
+
+        b.btnShare.setOnClickListener {
+            showShareChooser()
         }
 
         b.btnSettings.setOnClickListener {
@@ -303,7 +312,7 @@ class MainActivity : AppCompatActivity() {
             b.tvProBadge.visibility = View.GONE
         }
 
-        b.tvNoticeSummary.text = "Попередження за ${effective.noticeMinutes} хв (${modeLabel(effective.alertMode)})."
+        b.tvNoticeSummary.text = "Попередження за ${effective.noticeMinutes} хв (${modeLabel()})."
 
         val names = cfg.regions.map { it.name }
         val regAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, names)
@@ -314,12 +323,84 @@ class MainActivity : AppCompatActivity() {
         suppressingRegionCallback = false
     }
 
-    private fun modeLabel(mode: String): String {
-        return when (mode) {
-            "speech" -> "тільки голос"
-            "audio" -> "тільки MP3/запис"
-            else -> "звук + голос"
+    private fun modeLabel(): String {
+        val overrides = prefs.getUserOverrides()
+        val hasMp3 = overrides.customOffAudioUri.isNotBlank() || overrides.customOnAudioUri.isNotBlank()
+        val hasText = overrides.customVoiceTextOff.isNotBlank() || overrides.customVoiceTextOn.isNotBlank()
+        return when {
+            overrides.alertSourceMode == "mp3" && hasMp3 -> "власний MP3 / запис"
+            overrides.alertSourceMode == "tts" && hasText -> "ваш текст (озвучення)"
+            else -> "стандарт додатка"
         }
+    }
+
+    private fun showShareChooser() {
+        val shareUrl = siteConfig.scheduleUrl.ifBlank { "https://uaserver.pp.ua/svitlo/" }
+        val shareTitle = "Графік відключень світла та сповіщення"
+        val shareText = "Дивіться актуальний графік відключень і встановіть сповіщення: $shareUrl"
+
+        val options = arrayOf(
+            "Telegram",
+            "Viber",
+            "Facebook",
+            "Email (електронна пошта)",
+            "Скопіювати посилання",
+            "Інший додаток…"
+        )
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Поділитися сторінкою сайту")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> {
+                        val tgUrl = "https://t.me/share/url?url=${Uri.encode(shareUrl)}&text=${Uri.encode("Графік відключень світла та сповіщення:")}"
+                        openShareUri(tgUrl, shareText)
+                    }
+                    1 -> {
+                        val viberUrl = "viber://forward?text=${Uri.encode(shareText)}"
+                        openShareUri(viberUrl, shareText)
+                    }
+                    2 -> {
+                        val fbUrl = "https://www.facebook.com/sharer/sharer.php?u=${Uri.encode(shareUrl)}"
+                        openShareUri(fbUrl, shareText)
+                    }
+                    3 -> {
+                        val mailUri = Uri.parse(
+                            "mailto:?subject=${Uri.encode(shareTitle)}&body=${Uri.encode(shareText)}"
+                        )
+                        try {
+                            startActivity(Intent(Intent.ACTION_SENDTO, mailUri))
+                        } catch (_: Exception) {
+                            openSystemShare(shareTitle, shareText)
+                        }
+                    }
+                    4 -> {
+                        val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+                        clipboard.setPrimaryClip(ClipData.newPlainText("UA Light Alert", shareUrl))
+                        Toast.makeText(this, "Посилання скопійовано: $shareUrl", Toast.LENGTH_SHORT).show()
+                    }
+                    else -> openSystemShare(shareTitle, shareText)
+                }
+            }
+            .setNegativeButton("Закрити", null)
+            .show()
+    }
+
+    private fun openShareUri(url: String, fallbackShareText: String) {
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        } catch (_: Exception) {
+            openSystemShare("Графік відключень світла", fallbackShareText)
+        }
+    }
+
+    private fun openSystemShare(subject: String, text: String) {
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, subject)
+            putExtra(Intent.EXTRA_TEXT, text)
+        }
+        startActivity(Intent.createChooser(intent, "Поділитися"))
     }
 
     private fun applyScheduleJson(raw: String) {
